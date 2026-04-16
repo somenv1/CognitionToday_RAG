@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables
+.env
+
+# Database
+instance/
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres_data/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Additional env file variants
+.env.local
+.env.*.local
+
+# RAG / vector / embedding caches (in case generated locally)
+chroma_db/
+faiss_index/
+*.pkl
+embeddings_cache/
+
+# Celery/worker state (since you have worker.py)
+celerybeat-schedule*
