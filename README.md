@@ -229,3 +229,4 @@ This improves retrieval for queries that match section intent more than paragrap
 2. Wire full-text search with `tsvector`.
 3. Add an evaluation script with gold questions.
 4. Replace placeholder reranking with a stronger cross-encoder or API reranker.
+
