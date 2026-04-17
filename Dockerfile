@@ -24,4 +24,4 @@ COPY . .
 # We don't EXPOSE a port here because Railway handles port routing.
 
 # Default command — Railway will override this per service (web vs worker)
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "run:app"]
+CMD gunicorn --bind 0.0.0.0:${PORT:-8000} run:app
