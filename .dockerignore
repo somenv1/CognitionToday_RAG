@@ -1,0 +1,39 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv
+env
+.venv
+*.egg-info
+
+# Environment (NEVER ship .env to production)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Docker
+Dockerfile
+docker-compose*.yml
+
+# Tests and dev stuff
+.pytest_cache
+.coverage
+htmlcov
+tests
+scripts
+
+# OS
+Thumbs.db
