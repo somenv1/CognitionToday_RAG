@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from xml.etree import ElementTree
 
 import requests
@@ -15,10 +17,24 @@ REQUEST_HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
 }
 
+# URL patterns to skip during sitemap discovery.
+# These are typical WordPress taxonomy / structural pages that aren't articles.
+NON_ARTICLE_PATTERNS = (
+    "/category/",
+    "/tag/",
+    "/author/",
+    "/feed/",
+    "/wp-content/",
+    "/wp-admin/",
+    "/wp-json/",
+    "/page/",          # pagination
+    "/comments/",
+)
+
 
 def _ingest_document(url: str) -> str:
+    """RQ job: ingest a single article URL. Returns the document id."""
     from app import create_app
-
     app = create_app()
     with app.app_context():
         service = IngestService(app.config)
@@ -26,37 +42,93 @@ def _ingest_document(url: str) -> str:
         return document.id
 
 
-def _sync_sitemap(sitemap_url: str) -> int:
-    from app import create_app
+def _fetch_sitemap_urls(sitemap_url: str, visited: set[str] | None = None) -> list[str]:
+    """
+    Recursively fetch sitemap(s) and return article URLs.
 
-    app = create_app()
-    with app.app_context():
-        response = requests.get(sitemap_url, headers=REQUEST_HEADERS, timeout=20)
-        response.raise_for_status()
-        root = ElementTree.fromstring(response.content)
+    Handles both sitemap index files (<sitemapindex> with child <sitemap> entries)
+    and regular sitemap files (<urlset> with <url> entries).
+    """
+    if visited is None:
+        visited = set()
+    if sitemap_url in visited:
+        return []
+    visited.add(sitemap_url)
 
-        urls = [
-            node.text
-            for node in root.findall(".//{*}loc")
+    response = requests.get(sitemap_url, headers=REQUEST_HEADERS, timeout=20)
+    response.raise_for_status()
+
+    root = ElementTree.fromstring(response.content)
+    tag = root.tag.lower()
+
+    # Is this a sitemap index (points to other sitemaps)?
+    if tag.endswith("sitemapindex"):
+        child_sitemap_urls = [
+            node.text.strip()
+            for node in root.findall(".//{*}sitemap/{*}loc")
             if node.text
         ]
+        collected: list[str] = []
+        for child_url in child_sitemap_urls:
+            collected.extend(_fetch_sitemap_urls(child_url, visited))
+        return collected
 
-        service = IngestService(app.config)
-        ingested = 0
-        for url in urls:
-            try:
-                service.ingest_url(url)
-                ingested += 1
-            except Exception:
-                app.logger.exception("Failed to ingest %s", url)
+    # Otherwise, it's a regular sitemap with article URLs.
+    return [
+        node.text.strip()
+        for node in root.findall(".//{*}url/{*}loc")
+        if node.text
+    ]
 
-        return ingested
+
+def _is_article_url(url: str) -> bool:
+    """Heuristic filter — skip obvious non-article URLs."""
+    lowered = url.lower()
+    if lowered.endswith(".xml"):
+        return False
+    for pattern in NON_ARTICLE_PATTERNS:
+        if pattern in lowered:
+            return False
+    return True
+
+
+def _sync_sitemap(sitemap_url: str) -> dict:
+    """
+    RQ job: walk the sitemap tree, filter non-article URLs,
+    and enqueue a separate ingestion job per article.
+
+    Runs fast (seconds) and returns a summary dict.
+    Actual article processing happens in parallel by other worker jobs.
+    """
+    from app import create_app
+    app = create_app()
+    with app.app_context():
+        all_urls = _fetch_sitemap_urls(sitemap_url)
+        article_urls = [url for url in all_urls if _is_article_url(url)]
+
+        if extensions.rq_queue is None:
+            raise RuntimeError("RQ queue is not initialized")
+
+        enqueued = 0
+        skipped = len(all_urls) - len(article_urls)
+        for url in article_urls:
+            extensions.rq_queue.enqueue(_ingest_document, url)
+            enqueued += 1
+
+        app.logger.info(
+            "Sitemap sync complete: enqueued=%d skipped=%d total_discovered=%d",
+            enqueued, skipped, len(all_urls),
+        )
+        return {
+            "enqueued": enqueued,
+            "skipped": skipped,
+            "total_discovered": len(all_urls),
+        }
 
 
 def enqueue_document_ingestion(config, url: str):
     if extensions.rq_queue is None:
         raise RuntimeError("RQ queue is not initialized")
-
     return extensions.rq_queue.enqueue(_ingest_document, url)
 
 
@@ -66,5 +138,4 @@ def enqueue_sitemap_sync(config):
         raise RuntimeError("BLOG_SITEMAP_URL is required for sitemap sync")
     if extensions.rq_queue is None:
         raise RuntimeError("RQ queue is not initialized")
-
     return extensions.rq_queue.enqueue(_sync_sitemap, sitemap_url)
