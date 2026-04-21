@@ -27,10 +27,13 @@ NON_ARTICLE_PATTERNS = (
     "/wp-content/",
     "/wp-admin/",
     "/wp-json/",
-    "/page/",          # pagination
+    "/page/",
     "/comments/",
+    "/web-stories/",
+    "/web-story/",
+    "?web-story",
+    "web-story-page=",
 )
-
 
 def _ingest_document(url: str) -> str:
     """RQ job: ingest a single article URL. Returns the document id."""
@@ -83,14 +86,21 @@ def _fetch_sitemap_urls(sitemap_url: str, visited: set[str] | None = None) -> li
 
 def _is_article_url(url: str) -> bool:
     """Heuristic filter — skip obvious non-article URLs."""
-    lowered = url.lower()
+    lowered = url.lower().rstrip("/")
     if lowered.endswith(".xml"):
+        return False
+    # Filter out bare domains (homepage like https://cognitiontoday.com)
+    # An article URL always has a path beyond the domain.
+    parts = lowered.split("/")
+    # After .split("/"), a bare URL like "https://cognitiontoday.com" has 3 parts:
+    # ["https:", "", "cognitiontoday.com"] — no path segment.
+    # A real article URL has 4+ parts.
+    if len(parts) < 4:
         return False
     for pattern in NON_ARTICLE_PATTERNS:
         if pattern in lowered:
             return False
     return True
-
 
 def _sync_sitemap(sitemap_url: str) -> dict:
     """

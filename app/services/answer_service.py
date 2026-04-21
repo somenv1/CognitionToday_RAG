@@ -83,15 +83,15 @@ class AnswerService:
     @staticmethod
     def _build_user_prompt(*, query: str, retrieval_result) -> str:
         context_blocks = []
-        for chunk in retrieval_result.chunks:
+        for index, chunk in enumerate(retrieval_result.chunks, start=1):
             context_blocks.append(
                 "\n".join(
                     [
-                        f"Chunk ID: {chunk.chunk_id}",
+                        f"[Source {index}]",
                         f"Title: {chunk.title}",
                         f"URL: {chunk.url}",
-                        f"Heading Path: {' > '.join(chunk.heading_path)}",
-                        "Content:",
+                        f"Section: {' > '.join(chunk.heading_path)}",
+                        "",
                         chunk.text,
                     ]
                 )
@@ -100,7 +100,8 @@ class AnswerService:
         return "\n\n".join(
             [
                 f"User question: {query}",
-                "Retrieved context:",
+                "",
+                "Retrieved blog excerpts:",
                 "\n\n---\n\n".join(context_blocks),
             ]
         )
