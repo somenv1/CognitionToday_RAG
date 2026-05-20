@@ -31,6 +31,7 @@ class IngestService:
         self.chunk_repo = ChunkRepository()
 
     def ingest_url(self, url: str) -> Document:
+        print(f"[IngestService] START: {url}", flush=True)
         response = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
         response.raise_for_status()
 
@@ -38,6 +39,7 @@ class IngestService:
         document = self.document_repo.get_by_url(cleaned.canonical_url)
 
         if document is None:
+            print(f"[IngestService] NEW document", flush=True)
             document = Document(
                 canonical_url=cleaned.canonical_url,
                 title=cleaned.title,
@@ -45,11 +47,13 @@ class IngestService:
             )
             self.document_repo.save(document)
         else:
+            print(f"[IngestService] EXISTING document", flush=True)
             document.title = cleaned.title
             document.last_seen_at = datetime.now(timezone.utc)
 
         active_version = self.document_repo.get_active_version(document.id)
         if active_version and active_version.content_hash == cleaned.content_hash:
+            print(f"[IngestService] FAST PATH (hash match), returning early", flush=True)
             self.document_repo.save(document)
             return document
 
@@ -69,11 +73,14 @@ class IngestService:
         self.document_repo.save(document)
 
         chunk_drafts = self.chunk_service.chunk_markdown(cleaned.cleaned_markdown)
+        print(f"[IngestService] chunked into {len(chunk_drafts)} pieces, calling embed_texts...", flush=True)
         try:
             embeddings = self.embedding_service.embed_texts(
                 [chunk.embedding_text for chunk in chunk_drafts]
             )
-        except RuntimeError:
+            print(f"[IngestService] got {len(embeddings)} embeddings back from embed_texts", flush=True)
+        except RuntimeError as e:
+            print(f"[IngestService] CAUGHT RuntimeError, using None embeddings: {e}", flush=True)
             embeddings = [None for _ in chunk_drafts]
 
         chunks: list[Chunk] = []
@@ -81,6 +88,9 @@ class IngestService:
 
         if len(chunk_drafts) != len(embeddings):
             raise ValueError("Chunk and embedding counts do not match during ingestion")
+
+        first_embedding_truthiness = embeddings[0] is not None if embeddings else None
+        print(f"[IngestService] building Chunk objects, first embedding is_not_none={first_embedding_truthiness}", flush=True)
 
         for index, (draft, embedding) in enumerate(zip(chunk_drafts, embeddings)):
             chunks.append(
@@ -108,5 +118,7 @@ class IngestService:
                 )
             )
 
+        print(f"[IngestService] saving {len(chunks)} chunks via bulk_replace_for_version", flush=True)
         self.chunk_repo.bulk_replace_for_version(version.id, chunks)
+        print(f"[IngestService] DONE: {url}", flush=True)
         return document
