@@ -176,5 +176,8 @@ class AnswerService:
                 "",
                 "Retrieved blog excerpts:",
                 "\n\n---\n\n".join(context_blocks),
+                "",
+                "Respond with a JSON object as specified in the instructions.",
+
             ]
         )
