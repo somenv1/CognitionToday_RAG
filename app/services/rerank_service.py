@@ -6,7 +6,9 @@ from __future__ import annotations
 MMR_LAMBDA = 0.7
 
 # Max chunks allowed from any single article (source URL) in the final result.
-MAX_CHUNKS_PER_DOCUMENT = 2
+# Dropped from 2 → 1 (litmus-driven experiment: baseline recall@5 = 0.244).
+# Revert if answer-quality loss outweighs recall improvement.
+MAX_CHUNKS_PER_DOCUMENT = 1
 
 # How much extra score to add per query term found in the article's title.
 # Kept small so it nudges ordering without dominating semantic+lexical signals.
