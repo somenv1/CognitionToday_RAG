@@ -1,0 +1,72 @@
+questions:
+  - id: cognition_001
+    category: cognition
+    question: "What is cognition?"
+    expected_urls:
+      - "https://cognitiontoday.com/category/cognition/"
+      - "https://cognitiontoday.com/what-is-cognition-executive-functions-and-cognitive-processes/"
+
+  - id: productivity_001
+    category: productivity
+    question: "I'm not feeling productive. What can I do?"
+    expected_urls:
+      - "https://cognitiontoday.com/your-brain-on-productivity-thinking-doing-modes/"
+      - "https://cognitiontoday.com/productivity-tips-for-gen-z/"
+      - "https://cognitiontoday.com/losing-focus-at-work-try-distractions-multitasking-music-breaks/"
+    notes: "flag this as high-variance — expect at least 2 of 3 retrieved in most cases."
+
+  - id: memory_001
+    category: memory
+    question: "How is memory stored?"
+    expected_urls:
+      - "https://cognitiontoday.com/memory-models-in-psychology-understanding-human-memory/"
+      - "https://cognitiontoday.com/in-what-form-is-memory-stored-in-the-brain-mind-an-introduction/"
+      - "https://cognitiontoday.com/metacognition-metamemory-meta-skills/"
+
+  - id: memory_002
+    category: memory
+    question: "How do I improve my memory?"
+    expected_urls:
+      - "https://cognitiontoday.com/mnemonic-techniques-to-slay-at-memorizing-tutorial/"
+      - "https://cognitiontoday.com/sciency-guide-to-expert-level-memory-skills/"
+      - "https://cognitiontoday.com/boost-memory-delay-cognitive-decline-memory-loss/"
+      - "https://cognitiontoday.com/memorization-techniques-to-improve-memory-for-facts/"
+
+  - id: therapy_001
+    category: mental_health
+    question: "Therapy isn't working. What should I do?"
+    expected_urls:
+      - "https://cognitiontoday.com/7-reasons-why-psychotherapy-fails-for-many-people/"
+      - "https://cognitiontoday.com/mental-health-recovery-toolkit-diy-edition/"
+
+  - id: digital_wellbeing_001
+    category: digital_wellbeing
+    question: "I'm spending too much time online and not doing anything."
+    expected_urls:
+      - "https://cognitiontoday.com/brainrot-reelationships-and-the-dm-verse/"
+      - "https://cognitiontoday.com/psychology-of-memes-advanced-emotions-outsourced-thoughts-mental-health/"
+      - "https://cognitiontoday.com/procrastinating-with-your-phone-reduce-procrastinatory-phone-dependence/"
+      - "https://cognitiontoday.com/phone-addiction-coping-solutions-research-statistics/"
+      - "https://cognitiontoday.com/effect-of-social-media-on-mental-health-well-being/"
+
+  - id: mental_health_001
+    category: mental_health
+    question: "I've been feeling depressed, and I don't know what to do."
+    expected_urls:
+      - "https://cognitiontoday.com/why-you-are-consistently-unhappy/"
+      - "https://cognitiontoday.com/biophilia-sensory-contact-with-nature-can-improve-your-overall-well-being-mental-health/"
+      - "https://cognitiontoday.com/habits-patterns-that-degrade-mental-health/"
+      - "https://cognitiontoday.com/mental-health-recovery-toolkit-diy-edition/"
+    notes: "Sensitive topic — qualitative flag the answer for appropriate handling, not just retrieval accuracy."
+
+  - id: psychology_001
+    category: psychology
+    question: "How can I use psychology for my sales and marketing?"
+    expected_urls:
+      - "https://cognitiontoday.com/nudge-marketing-and-behavioral-engineering/"
+      - "https://cognitiontoday.com/how-do-we-humanize-products-brands-science-branding-tips/"
+      - "https://cognitiontoday.com/consumer-psychology-for-marketers/"
+      - "https://cognitiontoday.com/how-and-why-looks-matter/"
+      - "https://cognitiontoday.com/smart-consumers-overcome-the-framing-effect/"
+      - "https://cognitiontoday.com/effort-heuristic-advertisement-marketing-psychology/"
+    notes: "6 expected URLs — recall@5 caps at 0.83, use recall@10 as primary metric for this one."
