@@ -177,6 +177,7 @@ Recommended Railway environment variables:
 - Add eval suite with labeled blog questions
 - Add caching for repeated queries
 - Add observability for retrieval scores, latency, and token spend
+- Vector index: chunks.embedding and concepts.embedding currently use sequential scan because pgvector 0.8.2 caps HNSW at 2000 dims while text-embedding-3-large outputs 3072 dims. At ~50k+ rows, either migrate to a vector store supporting 3072-dim ANN indexes (Pinecone, Qdrant) or adopt OpenAI's dimensions parameter to truncate to 1536 and add HNSW indexes on both tables.
 
 ## Example chunking behavior
 
