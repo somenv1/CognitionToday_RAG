@@ -25,6 +25,7 @@ class RetrievalResult:
     query: str
     normalized_query: str
     chunks: list[RetrievedChunk]
+    reranked_chunks: list[RetrievedChunk]
     vector_top_k: int
     lexical_top_k: int
     rerank_top_k: int
@@ -37,6 +38,7 @@ class RetrievalResult:
             "lexical_top_k": self.lexical_top_k,
             "rerank_top_k": self.rerank_top_k,
             "chunks": [asdict(chunk) for chunk in self.chunks],
+            "reranked_chunks": [asdict(chunk) for chunk in self.reranked_chunks],
         }
 
 
@@ -75,7 +77,7 @@ class RetrievalService:
             limit=self.config["RAG_RERANK_TOP_K"],
         )
 
-        final_chunks = [
+        all_reranked_chunks = [
             RetrievedChunk(
                 chunk_id=chunk.id,
                 text=chunk.text,
@@ -85,13 +87,15 @@ class RetrievalService:
                 retrieval_score=score,
                 retrieval_source=source,
             )
-            for chunk, score, source in reranked[: self.config["RAG_FINAL_CONTEXT_K"]]
+            for chunk, score, source in reranked
         ]
+        final_chunks = all_reranked_chunks[: self.config["RAG_FINAL_CONTEXT_K"]]
 
         retrieval_result = RetrievalResult(
             query=query,
             normalized_query=normalized_query,
             chunks=final_chunks,
+            reranked_chunks=all_reranked_chunks,
             vector_top_k=self.config["RAG_VECTOR_TOP_K"],
             lexical_top_k=self.config["RAG_LEXICAL_TOP_K"],
             rerank_top_k=self.config["RAG_RERANK_TOP_K"],

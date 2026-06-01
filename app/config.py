@@ -21,7 +21,7 @@ class BaseConfig:
 
     RAG_VECTOR_TOP_K = int(os.getenv("RAG_VECTOR_TOP_K", "30"))
     RAG_LEXICAL_TOP_K = int(os.getenv("RAG_LEXICAL_TOP_K", "20"))
-    RAG_RERANK_TOP_K = int(os.getenv("RAG_RERANK_TOP_K", "8"))
+    RAG_RERANK_TOP_K = int(os.getenv("RAG_RERANK_TOP_K", "15"))
     RAG_FINAL_CONTEXT_K = int(os.getenv("RAG_FINAL_CONTEXT_K", "5"))
     RAG_SCORE_THRESHOLD = float(os.getenv("RAG_SCORE_THRESHOLD", "0.015"))
 
