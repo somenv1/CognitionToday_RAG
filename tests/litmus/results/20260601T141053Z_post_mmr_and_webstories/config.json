@@ -1,0 +1,20 @@
+{
+  "timestamp": "20260601T141053Z",
+  "git_sha": "0e0324d",
+  "base_url": "http://127.0.0.1:8000",
+  "rag_settings": {
+    "RAG_VECTOR_TOP_K": 30,
+    "RAG_LEXICAL_TOP_K": 20,
+    "RAG_RERANK_TOP_K": 15,
+    "RAG_FINAL_CONTEXT_K": 5,
+    "RAG_SCORE_THRESHOLD": 0.015
+  },
+  "model_settings": {
+    "OPENAI_CHAT_MODEL": "gpt-4.1-mini",
+    "OPENAI_EMBEDDING_MODEL": "text-embedding-3-large"
+  },
+  "blog_settings": {
+    "BLOG_SITEMAP_URL": "https://cognitiontoday.com/sitemap-1.xml"
+  },
+  "recall_source": "debug.reranked_chunks \u2014 full reranker output before RAG_FINAL_CONTEXT_K slice. recall@5 uses top-5, recall@10 uses top-10 from this list."
+}
