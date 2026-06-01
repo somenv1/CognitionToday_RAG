@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import logging
 import uuid
 
 import requests
@@ -9,6 +10,12 @@ from app.repositories.document_repo import DocumentRepository
 from app.services.chunk_service import ChunkService
 from app.services.clean_service import CleanService
 from app.services.embedding_service import EmbeddingService
+
+logger = logging.getLogger(__name__)
+
+# URL path segments that identify non-article content we must never index.
+# Keep in sync with NON_ARTICLE_PATTERNS in app/workers/ingest_jobs.py.
+_BLOCKED_PATH_SEGMENTS = ("/web-stories/", "/web-story/")
 
 
 REQUEST_HEADERS = {
@@ -31,6 +38,11 @@ class IngestService:
         self.chunk_repo = ChunkRepository()
 
     def ingest_url(self, url: str) -> Document:
+        for segment in _BLOCKED_PATH_SEGMENTS:
+            if segment in url:
+                logger.info("Refusing to ingest non-article URL (blocked segment %r): %s", segment, url)
+                raise ValueError(f"URL contains blocked path segment {segment!r}: {url}")
+
         response = requests.get(url, headers=REQUEST_HEADERS, timeout=20)
         response.raise_for_status()
 
