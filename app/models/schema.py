@@ -6,7 +6,7 @@ from typing import Optional
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, ForeignKey, Index, Text
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.extensions import db
@@ -112,6 +112,36 @@ class IngestionJob(db.Model, TimestampMixin):
     status: Mapped[str] = mapped_column(default="queued", nullable=False)
     error_message: Mapped[Optional[str]] = mapped_column(Text)
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Concept(db.Model):
+    __tablename__ = "concepts"
+
+    id = db.Column(db.String, primary_key=True, default=new_uuid)
+    document_version_id = db.Column(
+        db.String,
+        db.ForeignKey("document_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    term = db.Column(db.String(200), nullable=False, index=True)
+    definition = db.Column(db.Text, nullable=False)
+    context_hint = db.Column(db.Text, nullable=True)
+    embedding = db.Column(Vector(3072), nullable=True)
+    embedding_model = db.Column(db.String(100), nullable=True)
+    extraction_order = db.Column(db.Integer, nullable=False)
+    metadata_json = db.Column(JSONB, nullable=False, default=dict)
+    created_at = db.Column(
+        db.DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    document_version = db.relationship("DocumentVersion", backref="concepts")
+
+    __table_args__ = (
+        db.Index("ix_concepts_term_lower", db.func.lower(term)),
+    )
 
 
 class QueryLog(db.Model, TimestampMixin):
