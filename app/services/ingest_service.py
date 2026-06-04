@@ -4,11 +4,13 @@ import uuid
 
 import requests
 
-from app.models.schema import Chunk, Document, DocumentVersion
+from app.models.schema import Chunk, Concept, Document, DocumentVersion
 from app.repositories.chunk_repo import ChunkRepository
+from app.repositories.concept_repo import ConceptRepository
 from app.repositories.document_repo import DocumentRepository
 from app.services.chunk_service import ChunkService
 from app.services.clean_service import CleanService
+from app.services.concept_extraction_service import ConceptExtractionService
 from app.services.embedding_service import EmbeddingService
 
 logger = logging.getLogger(__name__)
@@ -34,8 +36,10 @@ class IngestService:
         self.clean_service = CleanService()
         self.chunk_service = ChunkService()
         self.embedding_service = EmbeddingService(config)
+        self.concept_extraction_service = ConceptExtractionService(config)
         self.document_repo = DocumentRepository()
         self.chunk_repo = ChunkRepository()
+        self.concept_repo = ConceptRepository()
 
     def ingest_url(self, url: str) -> Document:
         for segment in _BLOCKED_PATH_SEGMENTS:
@@ -120,5 +124,49 @@ class IngestService:
                 )
             )
 
+        try:
+            concept_drafts = self.concept_extraction_service.extract(
+                title=cleaned.title, markdown=cleaned.cleaned_markdown
+            )
+        except Exception as exc:
+            logger.warning("Concept extraction failed for %s: %s", cleaned.canonical_url, exc)
+            concept_drafts = []
+
+        concept_embeddings: list = []
+        if concept_drafts:
+            try:
+                concept_embeddings = self.embedding_service.embed_texts(
+                    [draft.definition for draft in concept_drafts]
+                )
+            except RuntimeError:
+                concept_embeddings = [None for _ in concept_drafts]
+
+        concepts: list[Concept] = []
+        for draft, concept_embedding in zip(concept_drafts, concept_embeddings):
+            concepts.append(
+                Concept(
+                    id=str(uuid.uuid4()),
+                    document_version_id=version.id,
+                    term=draft.term,
+                    definition=draft.definition,
+                    context_hint=draft.context_hint,
+                    kind=draft.kind,
+                    embedding=concept_embedding,
+                    embedding_model=(
+                        self.config["OPENAI_EMBEDDING_MODEL"]
+                        if concept_embedding is not None
+                        else None
+                    ),
+                    extraction_order=draft.extraction_order,
+                    metadata_json=draft.metadata,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+
         self.chunk_repo.bulk_replace_for_version(version.id, chunks)
+
+        if concepts:
+            self.concept_repo.bulk_replace_for_version(version.id, concepts)
+            logger.info("Persisted %d concepts for document %s", len(concepts), cleaned.canonical_url)
+
         return document
