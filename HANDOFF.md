@@ -8,8 +8,8 @@
 |------|-------------|--------|
 | 1 | Schema + migration (`concepts` table) | Done — commit `1367a6a` |
 | 2 | `ConceptExtractionService` + dry-run script | Done — validated via dry-run |
-| 3 | `ConceptRepository` | **Next action** |
-| 4 | Ingest integration | Not started |
+| 3 | `ConceptRepository` | Done — commit `9d76ac9` |
+| 4 | Ingest integration | **Next action** |
 | 5 | Admin backfill endpoint (`POST /api/admin/concepts/backfill`) | Not started |
 | 6 | Retrieval integration (concept-derived candidates in RRF merge) | Not started |
 
@@ -29,7 +29,7 @@ Dry-run executed across all three articles. All runs returned 12 concepts.
 
 ## Next action when resuming
 
-**Step 3: ConceptRepository** — implement `vector_search`, `bulk_replace_for_version`, `get_by_document`; filters to active versions only.
+**Step 4: Ingest integration** — concepts are now persistable and searchable, but no code path creates them yet. Step 4 wires `ConceptExtractionService` into the ingest flow after chunks are built.
 
 ---
 
