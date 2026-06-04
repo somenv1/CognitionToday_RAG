@@ -7,42 +7,36 @@
 | Step | Description | Status |
 |------|-------------|--------|
 | 1 | Schema + migration (`concepts` table) | Done — commit `1367a6a` |
-| 2 | `ConceptExtractionService` + dry-run script | Built, **not yet committed** |
-| 3 | `ConceptRepository` | Not started |
+| 2 | `ConceptExtractionService` + dry-run script | Done — validated via dry-run |
+| 3 | `ConceptRepository` | **Next action** |
 | 4 | Ingest integration | Not started |
 | 5 | Admin backfill endpoint (`POST /api/admin/concepts/backfill`) | Not started |
 | 6 | Retrieval integration (concept-derived candidates in RRF merge) | Not started |
 
-### Uncommitted files
-- `app/services/concept_extraction_service.py`
-- `scripts/dry_run_concepts.py`
-
 ---
+
+## Step 2 validation results
+
+Dry-run executed across all three articles. All runs returned 12 concepts.
+
+| Article | Concepts | Notes |
+|---------|----------|-------|
+| `https://cognitiontoday.com/why-you-are-consistently-unhappy/` | 12 | Mixed kinds; named concepts verbatim ("Heaven's reward fallacy", "optimism bias") |
+| `https://cognitiontoday.com/your-brain-on-productivity-thinking-doing-modes/` | 12 | All 6 brain networks named verbatim with acronyms; author's "city/industries" metaphor preserved |
+| `https://cognitiontoday.com/mnemonic-techniques-to-slay-at-memorizing-tutorial/` | 12 | All 10 named techniques captured plus umbrella definition and framework concept |
+
+**Known limitation — `kind` field definition-bias:** Article 3 returned 10 of 12 as "definition" (most should arguably be "technique"). Acceptable because no retrieval logic reads `kind`; the `definition` text that gets embedded is high quality. Documented in `concept_extraction_service.py`. Revisit if Phase 3+ adds kind-based filtering.
 
 ## Next action when resuming
 
-**Do not skip straight to step 3.** The dry-run has NOT been executed yet.
-
-1. Run the dry-run against the three review articles below and inspect the extracted concepts.
-2. Review prompt quality with the user before proceeding.
-3. If extraction looks good, commit step 2 and move to step 3.
-
-### Dry-run command
-```bash
-python scripts/dry_run_concepts.py <canonical_url>
-```
-
-### Three articles slated for dry-run review
-- `https://cognitiontoday.com/why-you-are-consistently-unhappy/`
-- `https://cognitiontoday.com/your-brain-on-productivity-thinking-doing-modes/`
-- `https://cognitiontoday.com/mnemonic-techniques-to-slay-at-memorizing-tutorial/`
+**Step 3: ConceptRepository** — implement `vector_search`, `bulk_replace_for_version`, `get_by_document`; filters to active versions only.
 
 ---
 
 ## Full Phase 2 plan
 
 1. **Schema + migration** — `concepts` table with term, definition, context_hint, embedding (3072-dim), extraction_order, metadata_json (JSONB), FK to document_versions CASCADE.
-2. **ConceptExtractionService** — OpenAI structured outputs, model `gpt-4.1`, 8–12 concepts per article (max 15), 5-kind taxonomy (definition / framework / technique / claim / distinction).
+2. **ConceptExtractionService** — OpenAI structured outputs, model `gpt-4.1`, 8–12 concepts per article (max 15), 5-kind taxonomy (definition / framework / technique / claim / distinction). Committed at `6f9af2f`, validated via dry-run.
 3. **ConceptRepository** — `vector_search`, `bulk_replace_for_version`, `get_by_document`; filters to active versions only.
 4. **Ingest integration** — concept extraction runs after chunks are built, before version is committed; failures are swallowed with a warning (chunk ingestion is more important).
 5. **Admin backfill endpoint** — `POST /api/admin/concepts/backfill` enqueues extraction for all active versions with zero concepts.

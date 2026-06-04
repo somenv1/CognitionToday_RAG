@@ -4,6 +4,12 @@ import json
 import logging
 from dataclasses import dataclass, field
 
+# NOTE: the `kind` field has a definition-bias — the LLM tends to tag any
+# named concept as "definition" even when its content is procedural or
+# claim-shaped. No retrieval logic currently reads `kind`, so this is
+# documented rather than fixed. Revisit if Phase 3+ adds kind-based
+# filtering or weighting.
+
 logger = logging.getLogger(__name__)
 
 MAX_CONCEPTS = 15
