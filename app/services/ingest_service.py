@@ -17,7 +17,18 @@ logger = logging.getLogger(__name__)
 
 # URL path segments that identify non-article content we must never index.
 # Keep in sync with NON_ARTICLE_PATTERNS in app/workers/ingest_jobs.py.
-_BLOCKED_PATH_SEGMENTS = ("/web-stories/", "/web-story/")
+_BLOCKED_PATH_SEGMENTS = (
+    "/web-stories/",
+    "/web-story/",
+    "/membership-",
+    "/login/",
+    "/contact-us/",
+    "/contact/",
+    "/subscribe-",
+    "/disclaimer",
+    "/donate",
+    "/can-you-spot-these-cognitive-biases/",
+)
 
 
 REQUEST_HEADERS = {

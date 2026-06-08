@@ -33,6 +33,14 @@ NON_ARTICLE_PATTERNS = (
     "/web-story/",
     "?web-story",
     "web-story-page=",
+    "/membership-",
+    "/login/",
+    "/contact-us/",
+    "/contact/",
+    "/subscribe-",
+    "/disclaimer",
+    "/donate",
+    "/can-you-spot-these-cognitive-biases/",
 )
 
 def _ingest_document(url: str) -> str:
