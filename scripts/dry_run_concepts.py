@@ -80,7 +80,7 @@ def main() -> None:
         print()
 
         for c in concepts:
-            print(f"[{c.extraction_order + 1:2d}] {c.term}  [{c.kind}]")
+            print(f"[{c.extraction_order + 1:2d}] {c.term}")
             print(f"      Definition   : {c.definition}")
             if c.context_hint:
                 print(f"      Context hint : {c.context_hint}")
@@ -93,7 +93,6 @@ def main() -> None:
                     "term": c.term,
                     "definition": c.definition,
                     "context_hint": c.context_hint,
-                    "kind": c.kind,
                     "extraction_order": c.extraction_order,
                     "metadata": c.metadata,
                 }

@@ -150,7 +150,6 @@ class IngestService:
                     term=draft.term,
                     definition=draft.definition,
                     context_hint=draft.context_hint,
-                    kind=draft.kind,
                     embedding=concept_embedding,
                     embedding_model=(
                         self.config["OPENAI_EMBEDDING_MODEL"]

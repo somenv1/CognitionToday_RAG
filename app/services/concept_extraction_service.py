@@ -4,11 +4,21 @@ import json
 import logging
 from dataclasses import dataclass, field
 
-# NOTE: the `kind` field has a definition-bias — the LLM tends to tag any
-# named concept as "definition" even when its content is procedural or
-# claim-shaped. No retrieval logic currently reads `kind`, so this is
-# documented rather than fixed. Revisit if Phase 3+ adds kind-based
-# filtering or weighting.
+# NOTE: an earlier iteration of this service extracted a `kind` field per concept
+# (definition / framework / technique / claim / distinction). It was removed because:
+#   - the LLM showed a strong definition-bias, tagging ~85% of concepts "definition"
+#     regardless of actual content type (validated across 3 articles on 2026-06-02);
+#   - no code path consumed the field, so persisting it added complexity without value;
+#   - it was never added to the Concept ORM model or migration, so the dataclass field
+#     was effectively unreachable.
+# If a future phase needs kind-based filtering or weighting (e.g. preferring `technique`
+# concepts for how-to queries), add it back deliberately:
+#   1. Add `kind` as a column on Concept in app/models/schema.py
+#   2. Generate a migration adding the column
+#   3. Restore the field to ConceptDraft, the JSON schema, and the prompt
+#   4. Iterate on the prompt to reduce the definition-bias (the previous prompt's
+#      examples were too definition-shaped — see commit history around 2026-06-02)
+# Don't restore it without a concrete consumer driving the design.
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +37,8 @@ _SCHEMA = {
                     "term":         {"type": "string", "minLength": 3,  "maxLength": 100},
                     "definition":   {"type": "string", "minLength": 20, "maxLength": 500},
                     "context_hint": {"type": ["string", "null"],        "maxLength": 200},
-                    "kind": {
-                        "type": "string",
-                        "enum": ["definition", "framework", "technique", "claim", "distinction"],
-                    },
                 },
-                "required": ["term", "definition", "context_hint", "kind"],
+                "required": ["term", "definition", "context_hint"],
                 "additionalProperties": False,
             },
         }
@@ -65,14 +71,7 @@ referents ("it", "this", "they"). No forward or backward references \
 4. NO INVENTION — Do not extract or imply any concept not clearly grounded \
 in the source text. When in doubt, omit it.
 
-5. KIND — Assign exactly one kind per concept:
-   • definition  — the article defines or names a term
-   • framework   — the article presents a model, system, or structured set of ideas
-   • technique   — the article describes a practical method or procedure
-   • claim       — the article makes a specific empirical or causal assertion
-   • distinction — the article explicitly contrasts two or more things
-
-6. context_hint — Optional. A 1–2 sentence pointer to where in the article \
+5. context_hint — Optional. A 1–2 sentence pointer to where in the article \
 this concept appears (e.g., the section name, a key example, or a brief \
 location marker). Set to null if the concept runs throughout the article.
 
@@ -89,7 +88,6 @@ class ConceptDraft:
     term: str
     definition: str
     context_hint: str | None
-    kind: str
     extraction_order: int
     metadata: dict = field(default_factory=dict)
 
@@ -144,7 +142,6 @@ class ConceptExtractionService:
                     term=item["term"],
                     definition=item["definition"],
                     context_hint=item.get("context_hint"),
-                    kind=item["kind"],
                     extraction_order=order,
                     metadata={
                         "model": self.model,
