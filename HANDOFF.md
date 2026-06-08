@@ -10,8 +10,8 @@
 | 2 | `ConceptExtractionService` + dry-run script | Done — validated via dry-run |
 | 3 | `ConceptRepository` | Done — commit `9d76ac9` |
 | 4 | Ingest integration | Done — validated 2026-06-08 (12/12 concepts + embeddings) |
-| 5 | Admin backfill endpoint (`POST /api/admin/concepts/backfill`) | **Next action** |
-| 6 | Retrieval integration (concept-derived candidates in RRF merge) | Not started |
+| 5 | Admin backfill endpoint (`POST /api/admin/concepts/backfill`) | Done — validated 2026-06-08 (single-doc + bulk backfill passed); corpus cleanup commit `0717414` |
+| 6 | Retrieval integration (concept-derived candidates in RRF merge) | **Next action** |
 
 ---
 
@@ -27,9 +27,20 @@ Dry-run executed across all three articles. All runs returned 12 concepts.
 
 **Known limitation — `kind` field definition-bias:** Article 3 returned 10 of 12 as "definition" (most should arguably be "technique"). Acceptable because no retrieval logic reads `kind`; the `definition` text that gets embedded is high quality. Documented in `concept_extraction_service.py`. Revisit if Phase 3+ adds kind-based filtering.
 
+## Step 5 validation results
+
+Two integration tests passed: single-doc backfill returned 13 concepts; bulk backfill enqueued 3 jobs that all completed.
+
+**Corpus pollution found during Test 2** — non-article URLs (contact-us, membership pages, login, disclaimer, donate, an interactive quiz) had been ingested and were producing junk concepts (e.g. `contact-us/` yielded 4 "concepts" that were really form bullets). This prompted a corpus audit of all documents with markdown <2000 chars, which found 16 short non-article URLs.
+
+Cleanup (commit `0717414`):
+- Extended `_BLOCKED_PATH_SEGMENTS` (`ingest_service.py`) and `NON_ARTICLE_PATTERNS` (`ingest_jobs.py`) with 8 new patterns: `/membership-`, `/login/`, `/contact-us/`, `/contact/`, `/subscribe-`, `/disclaimer`, `/donate`, `/can-you-spot-these-cognitive-biases/`
+- Soft-deleted the 14 affected documents (`document_versions.is_active = false`, `documents.active_version_id = NULL`); verified 0 still active, 14 inactive
+- `/introduction/` intentionally kept — extracted 8 valid concepts, treated as a real article
+
 ## Next action when resuming
 
-**Step 5: Admin backfill endpoint** — `POST /api/admin/concepts/backfill`. Ingestion now creates concepts for new versions automatically; existing documents ingested before `eea7e95` have zero concepts and need backfill before Step 6 can use them.
+**Step 6: Retrieval integration** — concept vector search runs in parallel with chunk searches; high-scoring concept matches derive their source article's chunks into the candidate pool with a concept-derived boost; RRF merge becomes 3-way (vector + lexical + concept-derived); `retrieval_source` field tracks provenance.
 
 ---
 
