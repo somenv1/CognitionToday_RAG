@@ -60,17 +60,18 @@ def _recall_at_k(expected_canonical: set[str], retrieved_urls: list[str], k: int
 
 def score_question(question: dict, response_data: dict) -> dict:
     expected_canonical = {canonicalize_url(u) for u in question["expected_urls"]}
+    n_expected = len(expected_canonical)
 
     # reranked_chunks: full reranker output (up to RAG_RERANK_TOP_K = 15).
-    # This is the authoritative source for all recall metrics.
+    # This is the authoritative source for chunk recall metrics.
     reranked = response_data.get("debug", {}).get("reranked_chunks", [])
     reranked_urls = [c["url"] for c in reranked if isinstance(c, dict) and "url" in c]
 
-    r5 = _recall_at_k(expected_canonical, reranked_urls, 5)
-    r10 = _recall_at_k(expected_canonical, reranked_urls, 10)
+    chunk_recall_at_5 = _recall_at_k(expected_canonical, reranked_urls, 5)
+    chunk_recall_at_10 = _recall_at_k(expected_canonical, reranked_urls, 10)
 
     top5_canonical = {canonicalize_url(u) for u in reranked_urls[:5]}
-    n_expected = len(expected_canonical)
+    top10_canonical = {canonicalize_url(u) for u in reranked_urls[:10]}
     n_hit_5 = sum(1 for u in expected_canonical if u in top5_canonical)
 
     hit = n_hit_5 >= 1
@@ -81,6 +82,38 @@ def score_question(question: dict, response_data: dict) -> dict:
         u for u in question["expected_urls"]
         if canonicalize_url(u) not in top5_canonical
     ]
+
+    # debug.concepts: up to RAG_CONCEPT_TOP_K concepts ordered by RRF-style
+    # rank. De-dupe to source-article URLs, preserving rank order, since
+    # several concepts can come from the same article.
+    raw_concepts = response_data.get("debug", {}).get("concepts", [])
+    concept_urls: list[str] = []
+    seen_concept_urls: set[str] = set()
+    for c in raw_concepts:
+        if not isinstance(c, dict) or "url" not in c:
+            continue
+        canonical = canonicalize_url(c["url"])
+        if canonical not in seen_concept_urls:
+            seen_concept_urls.add(canonical)
+            concept_urls.append(c["url"])
+
+    concept_recall_at_5 = _recall_at_k(expected_canonical, concept_urls, 5)
+    concept_recall_at_8 = _recall_at_k(expected_canonical, concept_urls, 8)
+
+    # Union: an expected URL counts as retrieved if it's in the chunk top-K
+    # OR anywhere in the (de-duped) concept URLs — this is the headline
+    # Phase 2 metric.
+    concept_canonical = {canonicalize_url(u) for u in concept_urls}
+    union5_canonical = top5_canonical | concept_canonical
+    union10_canonical = top10_canonical | concept_canonical
+    union_recall_at_5 = (
+        sum(1 for u in expected_canonical if u in union5_canonical) / n_expected
+        if n_expected else 0.0
+    )
+    union_recall_at_10 = (
+        sum(1 for u in expected_canonical if u in union10_canonical) / n_expected
+        if n_expected else 0.0
+    )
 
     # citations = LLM-filtered sources; recorded for answer-quality audit only.
     citation_urls = [
@@ -96,10 +129,15 @@ def score_question(question: dict, response_data: dict) -> dict:
         "hit": hit,
         "partial": partial,
         "full": full,
-        "recall_at_5": r5,
-        "recall_at_10": r10,
+        "chunk_recall_at_5": chunk_recall_at_5,
+        "chunk_recall_at_10": chunk_recall_at_10,
+        "concept_recall_at_5": concept_recall_at_5,
+        "concept_recall_at_8": concept_recall_at_8,
+        "union_recall_at_5": union_recall_at_5,
+        "union_recall_at_10": union_recall_at_10,
         "expected_urls": question["expected_urls"],
         "reranked_urls": reranked_urls,
+        "concept_urls": concept_urls,
         "citation_urls": citation_urls,
         "missing_from_top5": missing_from_top5,
         "available_reranked": len(reranked_urls),
@@ -160,6 +198,7 @@ def _load_env_config() -> dict:
         "RAG_RERANK_TOP_K": int(_get("RAG_RERANK_TOP_K", "15")),
         "RAG_FINAL_CONTEXT_K": int(_get("RAG_FINAL_CONTEXT_K", "5")),
         "RAG_SCORE_THRESHOLD": float(_get("RAG_SCORE_THRESHOLD", "0.015")),
+        "RAG_CONCEPT_TOP_K": int(_get("RAG_CONCEPT_TOP_K", "8")),
         "OPENAI_CHAT_MODEL": _get("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
         "OPENAI_EMBEDDING_MODEL": _get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-large"),
         "BLOG_SITEMAP_URL": _get("BLOG_SITEMAP_URL", ""),
@@ -178,6 +217,7 @@ def build_config_json(base_url: str, git_sha: str, timestamp: str) -> dict:
             "RAG_RERANK_TOP_K": cfg["RAG_RERANK_TOP_K"],
             "RAG_FINAL_CONTEXT_K": cfg["RAG_FINAL_CONTEXT_K"],
             "RAG_SCORE_THRESHOLD": cfg["RAG_SCORE_THRESHOLD"],
+            "RAG_CONCEPT_TOP_K": cfg["RAG_CONCEPT_TOP_K"],
         },
         "model_settings": {
             "OPENAI_CHAT_MODEL": cfg["OPENAI_CHAT_MODEL"],
@@ -187,8 +227,11 @@ def build_config_json(base_url: str, git_sha: str, timestamp: str) -> dict:
             "BLOG_SITEMAP_URL": cfg["BLOG_SITEMAP_URL"],
         },
         "recall_source": (
-            "debug.reranked_chunks — full reranker output before RAG_FINAL_CONTEXT_K slice. "
-            "recall@5 uses top-5, recall@10 uses top-10 from this list."
+            "Chunk recall: debug.reranked_chunks — full reranker output before "
+            "RAG_FINAL_CONTEXT_K slice. recall@5 uses top-5, recall@10 uses top-10 "
+            "from this list. Concept recall: debug.concepts — up to RAG_CONCEPT_TOP_K "
+            "concepts, de-duped to source-article URLs, ordered by RRF-style rank. "
+            "Union recall: chunk top-K OR concept URLs."
         ),
     }
 
@@ -210,8 +253,10 @@ def build_report(results: list[dict], timestamp: str, git_sha: str) -> str:
     n_hit = sum(1 for r in scored if r["hit"])
     n_partial = sum(1 for r in scored if r["partial"])
     n_full = sum(1 for r in scored if r["full"])
-    mean_r5 = sum(r["recall_at_5"] for r in scored) / n_scored if n_scored else 0.0
-    mean_r10 = sum(r["recall_at_10"] for r in scored) / n_scored if n_scored else 0.0
+    mean_chunk_r5 = sum(r["chunk_recall_at_5"] for r in scored) / n_scored if n_scored else 0.0
+    mean_chunk_r10 = sum(r["chunk_recall_at_10"] for r in scored) / n_scored if n_scored else 0.0
+    mean_concept_r5 = sum(r["concept_recall_at_5"] for r in scored) / n_scored if n_scored else 0.0
+    mean_union_r5 = sum(r["union_recall_at_5"] for r in scored) / n_scored if n_scored else 0.0
 
     lines: list[str] = []
 
@@ -228,11 +273,19 @@ def build_report(results: list[dict], timestamp: str, git_sha: str) -> str:
         f"- **Hit rate** (≥1 expected URL in top 5): {_pct(n_hit, n_scored)}",
         f"- **Partial rate** (≥50% expected URLs in top 5): {_pct(n_partial, n_scored)}",
         f"- **Full rate** (all expected URLs in top 5): {_pct(n_full, n_scored)}",
-        f"- **Mean recall@5**: {mean_r5:.3f}",
-        f"- **Mean recall@10**: {mean_r10:.3f}",
+        f"- **Mean recall@5**: {mean_chunk_r5:.3f}",
+        f"- **Mean recall@10**: {mean_chunk_r10:.3f}",
+        f"- **Mean concept recall@5**: {mean_concept_r5:.3f}",
+        f"- **Mean union recall@5**: {mean_union_r5:.3f}",
         "",
-        "> Recall metrics are computed from `debug.reranked_chunks` (full reranker output,",
+        "> Chunk recall is computed from `debug.reranked_chunks` (full reranker output,",
         "> up to `RAG_RERANK_TOP_K = 15`). recall@5 = top-5 of that list; recall@10 = top-10.",
+        ">",
+        "> Concept recall is computed from `debug.concepts` (up to `RAG_CONCEPT_TOP_K = 8`,",
+        "> de-duped to source-article URLs, ordered by RRF-style rank).",
+        ">",
+        "> Union recall counts an expected URL as retrieved if it appears in the chunk",
+        "> top-K OR anywhere in the concept URLs — the headline Phase 2 retrieval metric.",
     ]
 
     # ------------------------------------------------------------------
@@ -244,8 +297,8 @@ def build_report(results: list[dict], timestamp: str, git_sha: str) -> str:
         "",
         "# Per Question Results",
         "",
-        "| Question ID | Category | Hit | Partial | Full | Recall@5 | Recall@10 | Reranked |",
-        "|-------------|----------|:---:|:-------:|:----:|:--------:|:---------:|:--------:|",
+        "| Question ID | Category | Hit | Partial | Full | Recall@5 | Recall@10 | Concept@5 | Union@5 | Union@10 | Reranked |",
+        "|-------------|----------|:---:|:-------:|:----:|:--------:|:---------:|:---------:|:-------:|:--------:|:--------:|",
     ]
 
     for r in results:
@@ -255,13 +308,15 @@ def build_report(results: list[dict], timestamp: str, git_sha: str) -> str:
             f = "✓" if r["full"] else "✗"
             lines.append(
                 f"| `{r['id']}` | {r['category']} | {h} | {p} | {f}"
-                f" | {r['recall_at_5']:.2f} | {r['recall_at_10']:.2f} | {r['available_reranked']} |"
+                f" | {r['chunk_recall_at_5']:.2f} | {r['chunk_recall_at_10']:.2f}"
+                f" | {r['concept_recall_at_5']:.2f} | {r['union_recall_at_5']:.2f}"
+                f" | {r['union_recall_at_10']:.2f} | {r['available_reranked']} |"
             )
         else:
             err = r.get("error", "unknown error")[:50]
             lines.append(
                 f"| `{r['id']}` | {r.get('category', '')} | — | — | —"
-                f" | — | — | ERROR: {err} |"
+                f" | — | — | — | — | — | ERROR: {err} |"
             )
 
     # ------------------------------------------------------------------
@@ -297,6 +352,14 @@ def build_report(results: list[dict], timestamp: str, git_sha: str) -> str:
             lines += ["", "**Top-5 reranked URLs**:"]
             if r["reranked_urls"]:
                 for i, u in enumerate(r["reranked_urls"][:5], 1):
+                    found = " ✓" if canonicalize_url(u) in expected_c else ""
+                    lines.append(f"- [{i}] `{u}`{found}")
+            else:
+                lines.append("- *(none retrieved)*")
+
+            lines += ["", "**Concept-derived URLs**:"]
+            if r["concept_urls"]:
+                for i, u in enumerate(r["concept_urls"], 1):
                     found = " ✓" if canonicalize_url(u) in expected_c else ""
                     lines.append(f"- [{i}] `{u}`{found}")
             else:
@@ -390,11 +453,14 @@ def main() -> None:
         if api_result["status"] == "ok":
             scored = score_question(q, api_result["data"])
             scored["raw_response"] = api_result["data"]
-            r5, r10 = scored["recall_at_5"], scored["recall_at_10"]
+            r5, r10 = scored["chunk_recall_at_5"], scored["chunk_recall_at_10"]
+            c5, u5 = scored["concept_recall_at_5"], scored["union_recall_at_5"]
             label = "HIT " if scored["hit"] else "MISS"
             print(
                 f"           {label} | recall@5={r5:.2f}"
                 f" | recall@10={r10:.2f}"
+                f" | concept@5={c5:.2f}"
+                f" | union@5={u5:.2f}"
                 f" | reranked={scored['available_reranked']}"
             )
         else:
@@ -435,11 +501,13 @@ def main() -> None:
     scored = [r for r in all_results if "hit" in r]
     if scored:
         hit_rate = sum(1 for r in scored if r["hit"]) / len(scored)
-        mean_r5 = sum(r["recall_at_5"] for r in scored) / len(scored)
+        mean_r5 = sum(r["chunk_recall_at_5"] for r in scored) / len(scored)
+        mean_union_r5 = sum(r["union_recall_at_5"] for r in scored) / len(scored)
         print("=== Summary ===")
         print(f"Scored   : {len(scored)}/{len(all_results)}")
         print(f"Hit rate : {hit_rate:.1%}")
         print(f"Mean R@5 : {mean_r5:.3f}")
+        print(f"Mean Union@5 : {mean_union_r5:.3f}")
 
 
 if __name__ == "__main__":
