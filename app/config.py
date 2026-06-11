@@ -24,6 +24,7 @@ class BaseConfig:
     RAG_RERANK_TOP_K = int(os.getenv("RAG_RERANK_TOP_K", "15"))
     RAG_FINAL_CONTEXT_K = int(os.getenv("RAG_FINAL_CONTEXT_K", "5"))
     RAG_SCORE_THRESHOLD = float(os.getenv("RAG_SCORE_THRESHOLD", "0.015"))
+    RAG_CONCEPT_TOP_K = int(os.getenv("RAG_CONCEPT_TOP_K", "8"))
 
     BLOG_SITEMAP_URL = os.getenv("BLOG_SITEMAP_URL")
     BLOG_ALLOWED_HOSTS = [

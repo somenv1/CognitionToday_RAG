@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from app.repositories.chunk_repo import ChunkRepository
+from app.repositories.concept_repo import ConceptRepository
 from app.repositories.query_log_repo import QueryLogRepository
 from app.services.embedding_service import EmbeddingService
 from app.services.rerank_service import RerankService
@@ -21,11 +22,23 @@ class RetrievedChunk:
 
 
 @dataclass
+class RetrievedConcept:
+    concept_id: str
+    term: str
+    definition: str
+    url: str
+    title: str
+    context_hint: str | None
+    retrieval_score: float
+
+
+@dataclass
 class RetrievalResult:
     query: str
     normalized_query: str
     chunks: list[RetrievedChunk]
     reranked_chunks: list[RetrievedChunk]
+    concepts: list[RetrievedConcept]
     vector_top_k: int
     lexical_top_k: int
     rerank_top_k: int
@@ -39,6 +52,7 @@ class RetrievalResult:
             "rerank_top_k": self.rerank_top_k,
             "chunks": [asdict(chunk) for chunk in self.chunks],
             "reranked_chunks": [asdict(chunk) for chunk in self.reranked_chunks],
+            "concepts": [asdict(concept) for concept in self.concepts],
         }
 
 
@@ -46,6 +60,7 @@ class RetrievalService:
     def __init__(self, config) -> None:
         self.config = config
         self.chunk_repo = ChunkRepository()
+        self.concept_repo = ConceptRepository()
         self.query_log_repo = QueryLogRepository()
         self.embedding_service = EmbeddingService(config)
         self.rerank_service = RerankService()
@@ -68,6 +83,11 @@ class RetrievalService:
         lexical_candidates = self.chunk_repo.keyword_search(
             query=normalized_query,
             top_k=self.config["RAG_LEXICAL_TOP_K"],
+        )
+
+        concepts = self._retrieve_concepts(
+            query_embedding=query_embedding,
+            top_k=self.config["RAG_CONCEPT_TOP_K"],
         )
 
         merged = self._merge_candidates(vector_candidates, lexical_candidates)
@@ -96,6 +116,7 @@ class RetrievalService:
             normalized_query=normalized_query,
             chunks=final_chunks,
             reranked_chunks=all_reranked_chunks,
+            concepts=concepts,
             vector_top_k=self.config["RAG_VECTOR_TOP_K"],
             lexical_top_k=self.config["RAG_LEXICAL_TOP_K"],
             rerank_top_k=self.config["RAG_RERANK_TOP_K"],
@@ -112,6 +133,28 @@ class RetrievalService:
         self.query_log_repo.save(query_log)
 
         return retrieval_result
+
+    def _retrieve_concepts(self, query_embedding, top_k: int) -> list[RetrievedConcept]:
+        if query_embedding is None:
+            return []
+
+        raw_concepts = self.concept_repo.vector_search(
+            query_embedding=query_embedding,
+            top_k=top_k,
+        )
+
+        return [
+            RetrievedConcept(
+                concept_id=concept.id,
+                term=concept.term,
+                definition=concept.definition,
+                url=concept.document_version.document.canonical_url,
+                title=concept.document_version.document.title,
+                context_hint=concept.context_hint,
+                retrieval_score=1.0 / (60 + rank),
+            )
+            for rank, concept in enumerate(raw_concepts, start=1)
+        ]
 
     @staticmethod
     def _merge_candidates(vector_candidates, lexical_candidates):
