@@ -11,7 +11,8 @@
 | 3 | `ConceptRepository` | Done — commit `9d76ac9` |
 | 4 | Ingest integration | Done — validated 2026-06-08 (12/12 concepts + embeddings) |
 | 5 | Admin backfill endpoint (`POST /api/admin/concepts/backfill`) | Done — validated 2026-06-08 (single-doc + bulk backfill passed); corpus cleanup commit `0717414` |
-| 6 | Retrieval integration (concept-derived candidates in RRF merge) | **Next action** |
+| 6a | Add concept retrieval channel to `RetrievalService` | Done — validated 2026-06-11 (live endpoint returned 8 concepts for the depression query; concept channel surfaced `/simplifying-depression-a-serious-mental-health-issue/`, which the chunk channel missed entirely) |
+| 6b | Wire concepts into answer prompt + citation handling; extend litmus runner for concept recall; re-run litmus vs `baseline-post-cleanup` | **Next action** |
 
 ---
 
@@ -38,9 +39,13 @@ Cleanup (commit `0717414`):
 - Soft-deleted the 14 affected documents (`document_versions.is_active = false`, `documents.active_version_id = NULL`); verified 0 still active, 14 inactive
 - `/introduction/` intentionally kept — extracted 8 valid concepts, treated as a real article
 
+## Step 6a validation results
+
+Live `/api/chat` curl for the depression query returned `debug.concepts` with 8 entries. Top concepts came from `/simplifying-depression-a-serious-mental-health-issue/` — an article that wasn't surfacing via chunks for this query at all. Side-by-side comparison of chunk URLs vs. concept URLs showed 3/5 overlap, with 2 channel-unique URLs on each side; the concept channel's unique pick was the most on-the-nose article for the query.
+
 ## Next action when resuming
 
-**Step 6: Retrieval integration** — concept vector search runs in parallel with chunk searches; high-scoring concept matches derive their source article's chunks into the candidate pool with a concept-derived boost; RRF merge becomes 3-way (vector + lexical + concept-derived); `retrieval_source` field tracks provenance.
+**Step 6b: Wire concepts into answer + litmus** — wire concepts into the answer prompt and citation handling; extend the litmus runner to score concept retrieval recall separately; then re-run litmus against `baseline-post-cleanup`.
 
 ---
 
