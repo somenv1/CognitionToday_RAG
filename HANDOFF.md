@@ -54,6 +54,10 @@ Run: `tests/litmus/results/20260611T100229Z_concepts_retrieval_only/` (git SHA `
 - **Mean union recall@5 = 0.367** — a +0.067 lift over chunk-only recall@5 (0.300).
 - Hit rate 62.5% (5/8), Partial 37.5% (3/8), Full 0%.
 
+## Step 6b.2a diagnostic finding
+
+Step 6b.2a executed 2026-06-12: re-embedded all 3933 concepts using "{term}: {definition}". Diagnostic re-run showed only marginal improvement — Mnemonics moved from 0.4287 to 0.4349, Mind Palace from 0.4078 to 0.4231, but the top-8 floor also dropped (0.4788 → 0.4686), so the relative gap is essentially unchanged. The intervention applied uniformly to all concepts, so concepts that already had query-vocabulary-rich terms benefited as much as the canonical-named ones we hoped to help. The litmus run was skipped — the diagnostic was conclusive enough. Proceeding to 6b.2b (concepts in LLM prompt) to measure that intervention's effect; if Phase 2 needs further retrieval improvement, options like query expansion or concept-to-chunk derivation are documented for Phase 3.
+
 ## memory_002 diagnostic — concept channel under-delivery
 
 For "How do I improve my memory?" (expected URLs include `/mnemonic-techniques-to-slay-at-memorizing-tutorial/`, which has 12 dry-run-validated concepts from Step 2), the concept channel returned 0/4 expected URLs in its top 8.
