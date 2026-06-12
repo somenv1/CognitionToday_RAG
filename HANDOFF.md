@@ -46,7 +46,7 @@ Live `/api/chat` curl for the depression query returned `debug.concepts` with 8 
 
 ## Step 6b.1 litmus results (live run, `20260611T100229Z`)
 
-Run: `tests/litmus/results/20260611T100229Z/` (git SHA `67bbcb1`, 8 questions, live `/api/chat` endpoint).
+Run: `tests/litmus/results/20260611T100229Z_concepts_retrieval_only/` (git SHA `67bbcb1`, 8 questions, live `/api/chat` endpoint).
 
 - **Mean chunk recall@5 = 0.300** vs. baseline 0.331 (`20260601T141053Z_post_mmr_and_webstories`). The drop is entirely attributable to `memory_002` (0.25 → 0.00); the other 7 of 8 questions have identical chunk recall@5 to baseline.
 - **Mean chunk recall@10 = 0.429** vs. baseline 0.460. That drop is entirely attributable to `mental_health_001` (0.50 → 0.25); `memory_002`'s recall@10 is unchanged (0.25 → 0.25).
