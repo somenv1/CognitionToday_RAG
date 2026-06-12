@@ -143,17 +143,22 @@ class IngestService:
             logger.warning("Concept extraction failed for %s: %s", cleaned.canonical_url, exc)
             concept_drafts = []
 
+        embedding_inputs: list[str] = []
         concept_embeddings: list = []
         if concept_drafts:
+            # Embedding text: "{term}: {definition}". Including the term lets canonical
+            # names (e.g. "Mnemonics", "Method of Loci") match queries that use those
+            # names, even when the term itself contains no query-vocabulary tokens.
+            # Established 2026-06-12; motivation in
+            # tests/litmus/diagnostics/memory_002_concept_diag.py.
+            embedding_inputs = [f"{draft.term}: {draft.definition}" for draft in concept_drafts]
             try:
-                concept_embeddings = self.embedding_service.embed_texts(
-                    [draft.definition for draft in concept_drafts]
-                )
+                concept_embeddings = self.embedding_service.embed_texts(embedding_inputs)
             except RuntimeError:
                 concept_embeddings = [None for _ in concept_drafts]
 
         concepts: list[Concept] = []
-        for draft, concept_embedding in zip(concept_drafts, concept_embeddings):
+        for index, (draft, concept_embedding) in enumerate(zip(concept_drafts, concept_embeddings)):
             concepts.append(
                 Concept(
                     id=str(uuid.uuid4()),
@@ -161,6 +166,7 @@ class IngestService:
                     term=draft.term,
                     definition=draft.definition,
                     context_hint=draft.context_hint,
+                    embedding_input=embedding_inputs[index],
                     embedding=concept_embedding,
                     embedding_model=(
                         self.config["OPENAI_EMBEDDING_MODEL"]

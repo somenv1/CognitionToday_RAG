@@ -129,6 +129,7 @@ class Concept(db.Model):
     context_hint = db.Column(db.Text, nullable=True)
     embedding = db.Column(Vector(3072), nullable=True)
     embedding_model = db.Column(db.String(100), nullable=True)
+    embedding_input = db.Column(db.Text, nullable=True)
     extraction_order = db.Column(db.Integer, nullable=False)
     metadata_json = db.Column(JSONB, nullable=False, default=dict)
     created_at = db.Column(

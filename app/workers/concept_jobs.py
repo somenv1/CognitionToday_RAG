@@ -49,15 +49,15 @@ def _backfill_concepts_for_version(version_id: str) -> dict:
         if not concept_drafts:
             return {"version_id": version_id, "concept_count": 0, "embedded_count": 0}
 
+        # Embedding text: "{term}: {definition}" — same format as ingest_service.py.
+        embedding_inputs = [f"{draft.term}: {draft.definition}" for draft in concept_drafts]
         try:
-            concept_embeddings = embedding_service.embed_texts(
-                [draft.definition for draft in concept_drafts]
-            )
+            concept_embeddings = embedding_service.embed_texts(embedding_inputs)
         except RuntimeError:
             concept_embeddings = [None for _ in concept_drafts]
 
         concepts: list[Concept] = []
-        for draft, concept_embedding in zip(concept_drafts, concept_embeddings):
+        for index, (draft, concept_embedding) in enumerate(zip(concept_drafts, concept_embeddings)):
             concepts.append(
                 Concept(
                     id=str(uuid.uuid4()),
@@ -65,6 +65,7 @@ def _backfill_concepts_for_version(version_id: str) -> dict:
                     term=draft.term,
                     definition=draft.definition,
                     context_hint=draft.context_hint,
+                    embedding_input=embedding_inputs[index],
                     embedding=concept_embedding,
                     embedding_model=(
                         config["OPENAI_EMBEDDING_MODEL"]
