@@ -13,7 +13,7 @@
 | 5 | Admin backfill endpoint (`POST /api/admin/concepts/backfill`) | Done — validated 2026-06-08 (single-doc + bulk backfill passed); corpus cleanup commit `0717414` |
 | 6a | Add concept retrieval channel to `RetrievalService` | Done — validated 2026-06-11 (live endpoint returned 8 concepts for the depression query; concept channel surfaced `/simplifying-depression-a-serious-mental-health-issue/`, which the chunk channel missed entirely) |
 | 6b.1 | Extend litmus runner to score concept retrieval recall | Done — commit `67bbcb1`; live run results in "Step 6b.1 litmus results" below |
-| 6b.2 | Wire concepts into answer prompt + citation handling | Decision pending — see "Step 6b.2 decision" below |
+| 6b.2 | Wire concepts into answer prompt + citation handling | Done — see "Phase 2 close — final litmus and accounting" below for final accounting |
 
 ---
 
@@ -145,3 +145,56 @@ Resume with the Step 6b.2 decision above (proceed with prompt wiring, or improve
 - **Step 6b.1 live run (`20260611T100229Z`, git `67bbcb1`):** mean chunk recall@5 = 0.300, recall@10 = 0.429; mean concept recall@5 = 0.254; mean union recall@5 = 0.367. See "Step 6b.1 litmus results" and "memory_002 diagnostic" above.
 - **MAX_CHUNKS_PER_DOCUMENT = 1** is a litmus-driven experiment (was 2); revert if Phase 2 doesn't justify the loss.
 - Concept-aware metrics (concept recall, union recall) are new in Step 6b.1 and have no pre-Phase-2 baseline to compare against.
+
+---
+
+## Phase 2 close — final litmus and accounting
+
+**Final run:** `tests/litmus/results/20260613T083908Z_with_cited_recall/` (git SHA `c8a33a2`).
+
+### Final numbers (8 questions, against `baseline-post-cleanup` recall@5 = 0.331)
+
+| Metric | Value | Notes |
+|---|---|---|
+| Mean chunk recall@5 | 0.300 | Identical across last 3 runs — chunk pipeline untouched |
+| Mean concept recall@5 | 0.254 | Concept channel retrieval recall |
+| Mean union recall@5 | 0.367 | +0.067 lift over chunks-only; the headline Phase 2 retrieval gain |
+| Mean cited recall | 0.238 | LLM-filtered citations matching expected URLs |
+| Hit rate | 62.5% (5/8) | ≥1 expected URL in top 5 |
+
+### What Phase 2 delivered
+
+1. **Concept extraction pipeline.** 3933 concepts across 325 articles, all embedded (text-embedding-3-large), backfilled idempotently via admin endpoint. Extraction prompt produces 7–15 concepts per article (mean 12.1).
+2. **Concept retrieval channel.** Parallel to chunk vector + lexical search; RRF-style scored; surfaces articles chunk retrieval misses (Test B: `/simplifying-depression-a-serious-mental-health-issue/` surfaced via concepts, missed by chunks).
+3. **Concepts in LLM prompt.** Unified [Source N] numbering across ARTICLE PASSAGES and KEY CONCEPTS sections. Citations gain `source` field ("chunk" or "concept"). The LLM cites canonical concept definitions for named-term queries.
+4. **Litmus infrastructure.** Three new metrics: concept recall, union recall, cited recall. Failure analysis shows chunk URLs, concept URLs, and LLM-cited URLs side-by-side for debugging.
+
+### Known limitations
+
+1. **Memory_002 stubborn miss.** Expected URLs (mnemonic-techniques tutorial, etc.) have 12 high-quality concepts in the DB but rank below verbose memory-themed definitions from tangential articles. Cosine gap is 0.031 — decisive. Documented in `tests/litmus/diagnostics/memory_002_concept_diag.py`. Term+definition re-embedding (Step 6b.2a) gave only marginal improvement (~0.01 in similarity) and didn't move retrieval ranking.
+2. **Mental_health_001 ground-truth gap.** Concept channel surfaces `/simplifying-depression-a-serious-mental-health-issue/` for the depression query — qualitatively the right article — but it's not in Aditya's expected URL list. Would need ground truth update from Aditya before declaring this resolved.
+3. **LLM citation filtering.** Cited recall systematically lags union recall (0.238 vs 0.367). The LLM filters retrieved sources to what it materially used; for questions with multiple valid expected URLs, this means cited recall is lower-bounded by union but is not the same metric.
+
+### Phase 3 considerations (not committed, parked here)
+
+- **Query expansion.** Rewrite user query before retrieval to include likely concept terms ("How do I improve my memory?" → "...Mnemonics, Method of Loci, memorization techniques..."). Would help canonical-name queries that the current embedding model misses.
+- **Concept-to-chunk derivation.** When a concept matches, inject its source article's chunks into the candidate pool. Larger change but addresses the memory_002 class of failure directly.
+- **Session-level context.** Aditya's third vector DB (chat session history) for multi-turn conversations.
+- **WordPress taxonomy + summaries.** Document summaries and WP tags as additional retrieval signals.
+- **Cross-encoder reranker.** Replace lexical-overlap rerank with `cross-encoder/ms-marco-MiniLM-L-6-v2` (or API-based).
+- **Restore the `kind` field** if a future consumer needs concept-type filtering (recipe in `concept_extraction_service.py`).
+
+### Step status — all Done
+
+| Step | Description | Commit |
+|---|---|---|
+| 1 | Concept schema + migration | `1367a6a` |
+| 2 | Extraction service + dry-run | `6f9af2f` |
+| 3 | Concept repository | `9d76ac9` |
+| 4 | Ingest integration | `eea7e95` |
+| 5 | Admin backfill endpoint + corpus cleanup | `c972640`, `0717414` |
+| 6a | Concept retrieval channel in RetrievalService | `799816a` |
+| 6b.1 | Litmus runner with chunk/concept/union recall | `67bbcb1` |
+| 6b.2a | Re-embed concepts with term+definition format | `2a8f938` |
+| 6b.2b | Concepts in LLM answer prompt | `d46ded5` |
+| 6b.2c | Cited recall metric in litmus runner | `c8a33a2` |
