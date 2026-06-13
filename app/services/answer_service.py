@@ -44,16 +44,28 @@ class AnswerService:
                 "I do not have enough evidence from the blog to answer that."
             )
 
-        all_citations = [
-            {"url": chunk.url, "title": chunk.title, "chunk_id": chunk.chunk_id}
+        final_concept_k = self.config.get("RAG_FINAL_CONCEPT_K", 8)
+        concepts = retrieval_result.concepts[:final_concept_k]
+
+        chunk_citations = [
+            {"url": chunk.url, "title": chunk.title, "source": "chunk", "chunk_id": chunk.chunk_id}
             for chunk in retrieval_result.chunks
         ]
+        concept_citations = [
+            {"url": concept.url, "title": concept.title, "source": "concept",
+             "concept_id": concept.concept_id, "concept_term": concept.term}
+            for concept in concepts
+        ]
+        # Order matters: must match the source numbering in _build_user_prompt.
+        # Chunks occupy indices 1..len(chunks), concepts occupy indices len(chunks)+1..end.
+        all_citations = chunk_citations + concept_citations
 
         if not self.api_key:
             return AnswerResult(
                 answer=(
-                    "Local retrieval is working and relevant blog chunks were found. "
-                    "Set OPENAI_API_KEY to generate a grounded natural-language answer."
+                    "Local retrieval is working — relevant blog chunks and concepts "
+                    "were found. Set OPENAI_API_KEY to generate a grounded "
+                    "natural-language answer."
                 ),
                 citations=all_citations,
                 confidence="medium",
@@ -68,7 +80,7 @@ class AnswerService:
             )
 
         user_prompt = self._build_user_prompt(
-            query=query, retrieval_result=retrieval_result
+            query=query, chunks=retrieval_result.chunks, concepts=concepts
         )
         client = OpenAI(api_key=self.api_key)
 
@@ -154,10 +166,10 @@ class AnswerService:
         return filtered
 
     @staticmethod
-    def _build_user_prompt(*, query: str, retrieval_result) -> str:
-        context_blocks = []
-        for index, chunk in enumerate(retrieval_result.chunks, start=1):
-            context_blocks.append(
+    def _build_user_prompt(*, query: str, chunks, concepts) -> str:
+        chunk_blocks = []
+        for index, chunk in enumerate(chunks, start=1):
+            chunk_blocks.append(
                 "\n".join(
                     [
                         f"[Source {index}]",
@@ -170,14 +182,28 @@ class AnswerService:
                 )
             )
 
-        return "\n\n".join(
-            [
-                f"User question: {query}",
-                "",
-                "Retrieved blog excerpts:",
-                "\n\n---\n\n".join(context_blocks),
-                "",
-                "Respond with a JSON object as specified in the instructions.",
+        sections = [
+            f"User question: {query}",
+            "ARTICLE PASSAGES:\n" + "\n\n---\n\n".join(chunk_blocks),
+        ]
 
-            ]
-        )
+        if concepts:
+            concept_blocks = []
+            for index, concept in enumerate(concepts, start=len(chunks) + 1):
+                concept_blocks.append(
+                    "\n".join(
+                        [
+                            f"[Source {index}]",
+                            f"Term: {concept.term}",
+                            f"Article: {concept.title}",
+                            f"URL: {concept.url}",
+                            "",
+                            concept.definition,
+                        ]
+                    )
+                )
+            sections.append("KEY CONCEPTS:\n" + "\n\n---\n\n".join(concept_blocks))
+
+        sections.append("Respond with a JSON object as specified in the instructions.")
+
+        return "\n\n".join(sections)
