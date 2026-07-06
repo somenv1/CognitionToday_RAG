@@ -2,6 +2,7 @@ from flask import Blueprint, current_app, request
 
 from app import extensions
 from app.services.answer_service import AnswerService, InsufficientContextError
+from app.services.query_rewrite_service import QueryRewriteService
 from app.services.retrieval_service import RetrievalService
 from app.services.session_service import SessionService
 
@@ -26,10 +27,17 @@ def chat():
     session_id, session = session_service.get_or_create(requested_session_id)
     recent_pairs = session_service.extract_recent_pairs(session)
 
-    # Write user turn before retrieval so it's persisted even if retrieval fails.
+    # Rewrite the query using session context so retrieval targets what
+    # the user actually means, not their literal words. Returns the original
+    # query unchanged when there's no session context to work from.
+    query_rewrite_service = QueryRewriteService(current_app.config)
+    retrieval_query = query_rewrite_service.rewrite(query=query, recent_pairs=recent_pairs)
+
+    # Write user turn (with the ORIGINAL query — that's what the user said).
     session_service.write_user_turn(session_id, query)
 
-    retrieval_result = retrieval_service.retrieve(query=query, filters=filters)
+    # Use the REWRITTEN query for retrieval so chunks/concepts match intent.
+    retrieval_result = retrieval_service.retrieve(query=retrieval_query, filters=filters)
 
     try:
         answer = answer_service.answer(
@@ -44,7 +52,7 @@ def chat():
             "confidence": "low",
             "grounded": False,
             "session_id": session_id,
-            "debug": retrieval_result.to_dict(),
+            "debug": retrieval_result.to_dict() | {"retrieval_query": retrieval_query},
         }, 200
 
     session_service.write_assistant_turn(session_id, answer.answer)
@@ -55,5 +63,5 @@ def chat():
         "confidence": answer.confidence,
         "grounded": answer.grounded,
         "session_id": session_id,
-        "debug": retrieval_result.to_dict(),
+        "debug": retrieval_result.to_dict() | {"retrieval_query": retrieval_query},
     }, 200
