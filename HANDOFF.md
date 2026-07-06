@@ -198,3 +198,120 @@ Resume with the Step 6b.2 decision above (proceed with prompt wiring, or improve
 | 6b.2a | Re-embed concepts with term+definition format | `2a8f938` |
 | 6b.2b | Concepts in LLM answer prompt | `d46ded5` |
 | 6b.2c | Cited recall metric in litmus runner | `c8a33a2` |
+
+---
+
+# Phase 3 — Session Context
+
+## Goal
+
+Add session-level conversation context to the RAG chatbot so multi-turn conversations work coherently. Then deploy to Railway for real-usage feedback.
+
+## Design decisions (locked)
+
+1. **TTL:** 60 minutes idle, refreshed on every chat message (via Redis SETEX)
+2. **Session ID:** server-generated UUID, returned in every response JSON body, sent by client in subsequent requests. Frontend stores in sessionStorage.
+3. **Reset:** dedicated `DELETE /api/chat/session/<id>` endpoint (Step 3.5)
+4. **History pattern:** last 2 turn-pairs verbatim in prompt (RECENT CONVERSATION) + top 3 vector-retrieved older turns (RELEVANT EARLIER CONVERSATION). Query embedding from chunk retrieval is reused for history search.
+5. **Turn embedding:** user query and assistant response embedded separately, asynchronously via RQ worker (Step 3.4). Soft-skip on failure — turn stored with `embedding=None`, `embedding_pending=True`.
+6. **Session cap:** 40 turns per session, FIFO eviction.
+
+## Step status
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 3.1 | SessionRepository — Redis-backed session storage | Done — commit `33fdb8a` |
+| 3.2 | Session-aware chat endpoint via SessionService | Done — validated 2026-06-17; commit `b8862da` |
+| 3.3a | QueryRewriteService for context-aware retrieval | Done — validated 2026-06-17; commit `d6f4b76` |
+| 3.3b | Vector retrieval over session history | Next |
+| 3.4 | Async embedding write-back via RQ worker | Not started |
+| 3.5 | Reset endpoint (`DELETE /api/chat/session/<id>`) | Not started |
+| 3.6 | Railway deployment prep | Not started |
+
+## Step 3.1 — SessionRepository (commit `33fdb8a`)
+
+Redis-backed session storage. Two keys per session: `session:<uuid>` (turn data) and `session:<uuid>:meta` (timestamps + count). 60-min TTL refreshed on writes. 40-turn FIFO cap. Validation script at `scripts/test_session_repo.py` (22 checks, all pass).
+
+Turn shape:
+```json
+{
+  "turn_id": "<uuid>",
+  "role": "user" | "assistant",
+  "content": "the text",
+  "embedding": null | [3072 floats],
+  "embedded_at": null | "iso timestamp",
+  "embedding_pending": true | false
+}
+```
+
+## Step 3.2 — Session-aware chat via SessionService (commit `b8862da`)
+
+New `SessionService` (app/services/session_service.py) encapsulates session lifecycle, turn construction, synchronous embedding, and recent-pair extraction. Chat endpoint delegates to it — no inline orchestration.
+
+Behavior:
+- Chat endpoint accepts optional `session_id`, creates one on first message
+- Returns `session_id` in every response (success + InsufficientContext paths)
+- Last 2 turn-pairs injected into LLM prompt under RECENT CONVERSATION section (before ARTICLE PASSAGES and KEY CONCEPTS)
+- Soft-skip on embedding failure: turn stored with `embedding=None`, `embedding_pending=True`
+- Synchronous embedding adds ~600-800ms per chat response; Step 3.4 moves this to async
+
+Validation via 3-message curl conversation (2026-06-17): Message 2 correctly resolved "it" to method of loci from message 1's RECENT CONVERSATION context. Discovered a follow-on issue that Step 3.3a addresses: ambiguous queries like "How do I actually start using it?" caused chunk retrieval to surface irrelevant articles because retrieval was context-blind.
+
+## Step 3.3a — QueryRewriteService (commit `d6f4b76`)
+
+New `QueryRewriteService` (app/services/query_rewrite_service.py) rewrites the user query using recent conversation before retrieval. Uses gpt-4.1-mini (same as answer model), plain-text output (not JSON), ~500-800ms added latency.
+
+Critical: three separate query variables thread through chat.py:
+- `query` (original) → session storage + LLM user prompt
+- `retrieval_query` (rewritten) → chunk/concept retrieval
+- The rewritten query is exposed in `debug.retrieval_query` for observability
+
+Skips rewriting when recent_pairs is empty (first message) or OPENAI_API_KEY is missing. Soft-skip on any OpenAI error falls back to original query.
+
+Validation results (2026-06-17):
+
+| Message | Original query | Rewritten query | Chunks on-topic |
+|---------|---------------|-----------------|-----------------|
+| 1 | "What is the method of loci?" | (unchanged — first message) | 5/5 method-of-loci related |
+| 2 | "How do I actually start using it?" | "How do I begin practicing and applying the method of loci technique to improve my memory?" | 4/5 (vs 0/5 before rewriting) |
+| 3 | "Tell me more." | "Can you provide more detailed tips and examples for effectively using the method of loci (memory palace) technique?" | 5/5 including mnemonic-techniques-to-slay-at-memorizing-tutorial |
+
+Notable Phase 2 crossover: message 3's chunk retrieval now surfaces `/mnemonic-techniques-to-slay-at-memorizing-tutorial/` — the article memory_002 litmus couldn't reach in Phase 2. Query rewriting incidentally addresses part of the Phase 2 canonical-name vs vocabulary-overlap embedding problem when conversation context clarifies the intent.
+
+Response time: ~13 seconds for a message with rewriting (up from ~10s). Argues strongly for Step 3.4 (async embedding write-back) to claw back latency before deployment.
+
+## Step 3.3b — Vector retrieval over session history (NEXT)
+
+Adds a third retrieval channel: cosine-similarity search over prior turn embeddings in the current session. Older turns judged relevant to the current query get injected as a new RELEVANT EARLIER CONVERSATION section, positioned between RECENT CONVERSATION and ARTICLE PASSAGES.
+
+Six sub-decisions locked (documented in the Step 3.3b spec, ready for tomorrow's session):
+1. Search over all turn embeddings individually, but return pair-hydrated results (both user turn and its assistant response)
+2. Exclude turns already in RECENT CONVERSATION (last 4 turns) + exclude turns where embedding_pending=true
+3. Vector search implementation in SessionRepository (Python cosine similarity — up to 40 embeddings per session, negligible latency)
+4. Top-K = 3, no similarity threshold for now (revisit if testing shows noise)
+5. Prompt structure: current question → RECENT → RELEVANT EARLIER → ARTICLE → CONCEPTS
+6. Prompt language for new rule already drafted (see spec)
+
+Validation plan: diagnostic script (`scripts/test_vector_history.py`) that populates a synthetic 10-turn session and tests semantic matches, plus a 5-message real curl conversation where message 4 explicitly references message 1's topic.
+
+## Steps 3.4-3.6 (planned)
+
+**3.4** — Move turn embedding to async RQ worker job. `SessionService._write_turn` gets swapped for an enqueue call. Reclaims ~800ms per request. Worker startup required.
+
+**3.5** — `DELETE /api/chat/session/<id>` endpoint. Backend for the "New conversation" UI button.
+
+**3.6** — Railway deployment: web service (Flask), worker service, Redis, Postgres+pgvector. Environment vars, migrations on deploy. Then real-usage learning begins.
+
+## Phase 3 architectural notes
+
+- **Session data is transient** (Redis, 60-min idle TTL). Deliberately not migrated to Postgres — sessions are conversation-scoped, not corpus-scoped.
+- **Query embedding is computed twice per request currently** — once in RetrievalService (chunks/concepts) and once in chat.py (for session history search, added in 3.3b). Duplicate cost; optimization deferred.
+- **No frontend yet** — Phase 3 validation is via curl only. Real frontend comes with Railway deployment.
+
+## Environment state (as of end-of-day 2026-06-17)
+
+Postgres and Redis running via docker-compose. Corpus intact from Phase 2 close:
+- 325 active documents
+- 4179 active chunks
+- 3933 active concepts (all embedded)
+- 0 active versions missing concepts
