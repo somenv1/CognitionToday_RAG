@@ -97,3 +97,13 @@ def chat():
         "session_id": session_id,
         "debug": debug_payload,
     }, 200
+
+
+@chat_bp.delete("/chat/session/<session_id>")
+def reset_session(session_id: str):
+    """Delete a session, wiping its conversation history.
+
+    Idempotent: returns 204 whether or not the session existed.
+    """
+    extensions.session_repo.delete_session(session_id)
+    return "", 204
