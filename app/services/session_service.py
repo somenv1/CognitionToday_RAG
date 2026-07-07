@@ -3,8 +3,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from app.services.embedding_service import EmbeddingService
-
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -14,7 +12,6 @@ class SessionService:
     def __init__(self, config, session_repo):
         self.config = config
         self.session_repo = session_repo
-        self.embedding_service = EmbeddingService(config)
 
     def get_or_create(self, session_id: str | None) -> tuple[str, dict]:
         """Return existing session if session_id is given and live; else create fresh."""
@@ -64,34 +61,32 @@ class SessionService:
         )
 
     def write_user_turn(self, session_id: str, content: str) -> str:
-        """Embed and persist a user turn. Returns turn_id."""
+        """Persist a user turn and enqueue its embedding. Returns turn_id."""
         return self._write_turn(session_id, "user", content)
 
     def write_assistant_turn(self, session_id: str, content: str) -> str:
-        """Embed and persist an assistant turn. Returns turn_id."""
+        """Persist an assistant turn and enqueue its embedding. Returns turn_id."""
         return self._write_turn(session_id, "assistant", content)
 
     def _write_turn(self, session_id: str, role: str, content: str) -> str:
-        turn_id = str(uuid.uuid4())
-        embedding: list[float] | None = None
-        pending = True
-        embedded_at: str | None = None
-        try:
-            embedding = self.embedding_service.embed_texts([content])[0]
-            pending = False
-            embedded_at = _now_iso()
-        except Exception:
-            # Soft-skip: turn stored without embedding; vector history retrieval
-            # in Step 3.3 will ignore it via the embedding_pending flag.
-            pass
+        """Write a turn synchronously with embedding_pending=True, then
+        enqueue an async embedding job.
 
+        The chat response no longer waits on turn embedding — turns are
+        durably written before the response returns, and the worker fills
+        in embeddings later.
+        """
+        from app.workers.session_jobs import enqueue_embed_turn
+
+        turn_id = str(uuid.uuid4())
         turn = {
             "turn_id": turn_id,
             "role": role,
             "content": content,
-            "embedding": embedding,
-            "embedded_at": embedded_at,
-            "embedding_pending": pending,
+            "embedding": None,
+            "embedded_at": None,
+            "embedding_pending": True,
         }
         self.session_repo.append_turn(session_id, turn)
+        enqueue_embed_turn(session_id, turn_id)
         return turn_id
