@@ -225,8 +225,8 @@ Add session-level conversation context to the RAG chatbot so multi-turn conversa
 | 3.3a | QueryRewriteService for context-aware retrieval | Done — validated 2026-06-17; commit `d6f4b76` |
 | 3.3b | Vector retrieval over session history | Done — validated 2026-06-18; commit `a689067` |
 | 3.4 | Async embedding write-back via RQ worker | Done — validated 2026-07-07; commit `cf0e412` |
-| 3.5 | Reset endpoint (`DELETE /api/chat/session/<id>`) | Not started — next up |
-| 3.6 | Railway deployment prep | Not started |
+| 3.5 | Reset endpoint (`DELETE /api/chat/session/<id>`) | Done — validated 2026-07-07; commit `3f24f10` |
+| 3.6 | Railway deployment prep | Next |
 
 ## Step 3.1 — SessionRepository (commit `33fdb8a`)
 
@@ -312,16 +312,25 @@ Validated 2026-07-07: live worker run processed 10 `embed_turn` jobs across two 
 
 Timing: reclaims ~2-3 seconds per chat response in practice (measured msg 1: ~14s → ~11.4s; msg 2: ~13s → ~10.8s) — larger than the original ~800ms estimate because synchronous embedding calls were actually costing ~1.5s each, not the estimated ~600ms.
 
+## Step 3.5 — Session reset endpoint (commit `3f24f10`)
+
+New route `DELETE /api/chat/session/<session_id>` wipes a session's conversation history, backing the frontend "New conversation" button. A pure `SessionRepository.delete_session` call — no new service needed.
+
+Design decisions:
+- Idempotent — returns 204 whether or not the session existed. End state is what the caller wanted either way.
+- No auth for MVP — session_ids are UUID4 (128 bits of entropy), so guessing risk is zero at personal-testing scale.
+- No format validation on `session_id` — non-UUID strings are treated as "session doesn't exist" and return 204, same as any other miss.
+
+Validated 2026-07-07 via 6 curl tests, all passing: session created then deleted returns 204 and Redis `EXISTS` goes 1 → 0; a second DELETE on the same id still returns 204 (idempotent); DELETE with a malformed (non-UUID) session_id returns 204; both `session:<id>` and `session:<id>:meta` keys are cleaned up together.
+
 ## Known limitations for Phase 3+ follow-on
 
 - **QueryRewriteService doesn't see `older_turns`.** For queries referencing history older than `RAG_HISTORY_RECENT_PAIRS` pairs, the rewritten query anchors to the wrong context. Fix: feed `older_turns` into the rewrite prompt. Requires flipping the compute order (older_turns before rewrite). Adds latency to the rewrite call. Defer until real usage shows this pattern is common.
 - **Query embedding is computed twice per request** — once in chat.py for `older_turns` search, once inside `RetrievalService` for chunk/concept vector search. Minor redundancy. Fix: pass embedding as a parameter to `RetrievalService.retrieve()`. Defer as part of a broader Step 3 optimization pass, or after Step 3.4 which will drop other latency more meaningfully.
 
-## Steps 3.5-3.6 (planned)
+## Step 3.6 (planned)
 
-**3.5** — `DELETE /api/chat/session/<id>` endpoint. Backend for the "New conversation" UI button. Next up.
-
-**3.6** — Railway deployment: web service (Flask), worker service, Redis, Postgres+pgvector. Environment vars, migrations on deploy. Then real-usage learning begins.
+**3.6** — Railway deployment: web service (Flask), worker service, Redis, Postgres+pgvector. Environment vars, migrations on deploy. Then real-usage learning begins. Next up.
 
 ## Phase 3 architectural notes
 
