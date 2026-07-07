@@ -43,6 +43,26 @@ class SessionService:
                 i -= 1
         return pairs
 
+    def search_older_turns(
+        self,
+        session_id: str,
+        query_embedding: list[float],
+    ) -> list[dict]:
+        """Return pair-hydrated older turns from the session that are
+        vector-similar to query_embedding.
+
+        Excludes turns already in RECENT CONVERSATION.
+        """
+        recent_pairs = self.config["RAG_HISTORY_RECENT_PAIRS"]
+        exclude_last_n = recent_pairs * 2
+        top_k = self.config["RAG_HISTORY_TOP_K"]
+        return self.session_repo.vector_search_turns(
+            session_id=session_id,
+            query_embedding=query_embedding,
+            top_k=top_k,
+            exclude_last_n=exclude_last_n,
+        )
+
     def write_user_turn(self, session_id: str, content: str) -> str:
         """Embed and persist a user turn. Returns turn_id."""
         return self._write_turn(session_id, "user", content)

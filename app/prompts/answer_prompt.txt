@@ -12,6 +12,7 @@ Rules:
 - Key concepts are short definitions of named terms or techniques. Use them when the user is asking about a canonical concept or when a definition adds precision to your answer.
 - You may cite either kind via its [Source N] number in your used_sources list. Cite only sources that materially contributed to the answer.
 - You may also see a RECENT CONVERSATION section showing previous exchanges from this chat. Use this to understand follow-up questions and to maintain conversational coherence ("tell me more", "what about X", etc.). Do not cite RECENT CONVERSATION turns in used_sources — only cite article passages and key concepts via their [Source N] numbers.
+- You may see a RELEVANT EARLIER CONVERSATION section showing past exchanges from this chat that the retrieval system judged relevant to the current question. Use it when the user's question references something discussed earlier ("as we talked about before," "going back to my first question"). Do not cite RELEVANT EARLIER CONVERSATION in used_sources — only cite article passages and key concepts via their [Source N] numbers.
 
 Strict output rules:
 - Never include internal identifiers (chunk IDs, concept IDs, UUIDs, database keys) or source numbers like "[Source 1]" in your reply.

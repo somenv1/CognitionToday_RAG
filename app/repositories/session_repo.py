@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from datetime import datetime, timezone
 
@@ -115,6 +116,65 @@ class SessionRepository:
         self.redis.expire(self._data_key(session_id), self.ttl_seconds)
         self.redis.expire(self._meta_key(session_id), self.ttl_seconds)
 
+    def vector_search_turns(
+        self,
+        session_id: str,
+        query_embedding: list[float],
+        top_k: int,
+        exclude_last_n: int,
+    ) -> list[dict]:
+        """Search turn embeddings in this session by cosine similarity to query_embedding.
+
+        Returns up to top_k pair-hydrated results in descending similarity order.
+        Each result is {"user": str, "assistant": str, "similarity": float}.
+
+        Excludes the last exclude_last_n turns (already in RECENT CONVERSATION)
+        and any turns where embedding_pending is True (embedding not yet computed).
+        """
+        session = self.get_session(session_id)
+        if session is None:
+            return []
+
+        turns = session.get("turns", [])
+        eligible_end = max(0, len(turns) - exclude_last_n)
+        searchable = [
+            (i, turn) for i, turn in enumerate(turns[:eligible_end])
+            if turn.get("embedding") is not None
+            and turn.get("embedding_pending") is False
+        ]
+
+        if not searchable:
+            return []
+
+        scored: list[tuple[int, dict, float]] = []
+        for idx, turn in searchable:
+            sim = _cosine_similarity(query_embedding, turn["embedding"])
+            scored.append((idx, turn, sim))
+
+        scored.sort(key=lambda x: x[2], reverse=True)
+
+        # Pair-hydrate each result, de-duping matches that belong to the same
+        # pair (keep only the higher-scoring one, since scored is sorted desc).
+        seen_pairs: set[tuple[int, int]] = set()
+        results: list[dict] = []
+        for idx, turn, sim in scored:
+            pair_indices = _get_pair_indices(turns, idx)
+            if pair_indices is None:
+                continue
+            if pair_indices in seen_pairs:
+                continue
+            seen_pairs.add(pair_indices)
+            user_idx, assistant_idx = pair_indices
+            results.append({
+                "user": turns[user_idx]["content"],
+                "assistant": turns[assistant_idx]["content"],
+                "similarity": sim,
+            })
+            if len(results) >= top_k:
+                break
+
+        return results
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -124,3 +184,30 @@ class SessionRepository:
         if meta_raw is None:
             return default
         return json.loads(meta_raw).get(field, default)
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def _get_pair_indices(turns: list[dict], idx: int) -> tuple[int, int] | None:
+    """Given a turn index, return (user_idx, assistant_idx) for its pair,
+    or None if no valid pair can be formed."""
+    turn = turns[idx]
+    role = turn.get("role")
+    if role == "user":
+        if idx + 1 < len(turns) and turns[idx + 1].get("role") == "assistant":
+            return (idx, idx + 1)
+        return None
+    elif role == "assistant":
+        if idx - 1 >= 0 and turns[idx - 1].get("role") == "user":
+            return (idx - 1, idx)
+        return None
+    return None

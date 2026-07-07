@@ -38,8 +38,16 @@ class AnswerService:
             self._system_prompt = PROMPT_FILE.read_text().strip()
         return self._system_prompt
 
-    def answer(self, *, query: str, retrieval_result, recent_pairs: list[dict] | None = None) -> AnswerResult:
+    def answer(
+        self,
+        *,
+        query: str,
+        retrieval_result,
+        recent_pairs: list[dict] | None = None,
+        older_turns: list[dict] | None = None,
+    ) -> AnswerResult:
         recent_pairs = recent_pairs or []
+        older_turns = older_turns or []
         if not retrieval_result.chunks:
             raise InsufficientContextError(
                 "I do not have enough evidence from the blog to answer that."
@@ -82,7 +90,7 @@ class AnswerService:
 
         user_prompt = self._build_user_prompt(
             query=query, chunks=retrieval_result.chunks, concepts=concepts,
-            recent_pairs=recent_pairs,
+            recent_pairs=recent_pairs, older_turns=older_turns,
         )
         client = OpenAI(api_key=self.api_key)
 
@@ -168,7 +176,14 @@ class AnswerService:
         return filtered
 
     @staticmethod
-    def _build_user_prompt(*, query: str, chunks, concepts, recent_pairs: list[dict] | None = None) -> str:
+    def _build_user_prompt(
+        *,
+        query: str,
+        chunks,
+        concepts,
+        recent_pairs: list[dict] | None = None,
+        older_turns: list[dict] | None = None,
+    ) -> str:
         chunk_blocks = []
         for index, chunk in enumerate(chunks, start=1):
             chunk_blocks.append(
@@ -192,6 +207,13 @@ class AnswerService:
                 for p in recent_pairs
             ])
             sections.append(f"RECENT CONVERSATION:\n{history_block}")
+
+        if older_turns:
+            older_block = "\n\n".join([
+                f"User: {t['user']}\nAssistant: {t['assistant']}"
+                for t in older_turns
+            ])
+            sections.append(f"RELEVANT EARLIER CONVERSATION:\n{older_block}")
 
         sections.append("ARTICLE PASSAGES:\n" + "\n\n---\n\n".join(chunk_blocks))
 

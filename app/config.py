@@ -27,6 +27,7 @@ class BaseConfig:
     RAG_CONCEPT_TOP_K = int(os.getenv("RAG_CONCEPT_TOP_K", "8"))
     RAG_FINAL_CONCEPT_K = int(os.getenv("RAG_FINAL_CONCEPT_K", "8"))
     RAG_HISTORY_RECENT_PAIRS = int(os.getenv("RAG_HISTORY_RECENT_PAIRS", "2"))
+    RAG_HISTORY_TOP_K = int(os.getenv("RAG_HISTORY_TOP_K", "3"))
 
     BLOG_SITEMAP_URL = os.getenv("BLOG_SITEMAP_URL")
     BLOG_ALLOWED_HOSTS = [
