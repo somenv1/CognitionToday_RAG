@@ -223,7 +223,7 @@ Add session-level conversation context to the RAG chatbot so multi-turn conversa
 | 3.1 | SessionRepository — Redis-backed session storage | Done — commit `33fdb8a` |
 | 3.2 | Session-aware chat endpoint via SessionService | Done — validated 2026-06-17; commit `b8862da` |
 | 3.3a | QueryRewriteService for context-aware retrieval | Done — validated 2026-06-17; commit `d6f4b76` |
-| 3.3b | Vector retrieval over session history | Next |
+| 3.3b | Vector retrieval over session history | Done — validated 2026-06-18; commit `a689067` |
 | 3.4 | Async embedding write-back via RQ worker | Not started |
 | 3.5 | Reset endpoint (`DELETE /api/chat/session/<id>`) | Not started |
 | 3.6 | Railway deployment prep | Not started |
@@ -280,19 +280,29 @@ Notable Phase 2 crossover: message 3's chunk retrieval now surfaces `/mnemonic-t
 
 Response time: ~13 seconds for a message with rewriting (up from ~10s). Argues strongly for Step 3.4 (async embedding write-back) to claw back latency before deployment.
 
-## Step 3.3b — Vector retrieval over session history (NEXT)
+## Step 3.3b — Vector retrieval over session history (commit `a689067`)
 
 Adds a third retrieval channel: cosine-similarity search over prior turn embeddings in the current session. Older turns judged relevant to the current query get injected as a new RELEVANT EARLIER CONVERSATION section, positioned between RECENT CONVERSATION and ARTICLE PASSAGES.
 
-Six sub-decisions locked (documented in the Step 3.3b spec, ready for tomorrow's session):
+Six sub-decisions locked and implemented:
 1. Search over all turn embeddings individually, but return pair-hydrated results (both user turn and its assistant response)
 2. Exclude turns already in RECENT CONVERSATION (last 4 turns) + exclude turns where embedding_pending=true
 3. Vector search implementation in SessionRepository (Python cosine similarity — up to 40 embeddings per session, negligible latency)
 4. Top-K = 3, no similarity threshold for now (revisit if testing shows noise)
 5. Prompt structure: current question → RECENT → RELEVANT EARLIER → ARTICLE → CONCEPTS
-6. Prompt language for new rule already drafted (see spec)
+6. Prompt language for new rule added to `answer_prompt.txt`
 
-Validation plan: diagnostic script (`scripts/test_vector_history.py`) that populates a synthetic 10-turn session and tests semantic matches, plus a 5-message real curl conversation where message 4 explicitly references message 1's topic.
+Validated 2026-06-18 via diagnostic script and 5-message curl conversation.
+
+- Diagnostic (10-turn synthetic session, `scripts/test_vector_history.py`): loci query hit the loci-pair at similarity 0.886; sleep-and-memory query hit the spaced-repetition pair, with the dreams pair correctly excluded via the recent-window exclusion.
+- Live conversation: message 4 ("Going back to the first technique I asked about") surfaced the loci pair in `older_turns` (similarity 0.368) but the answer discussed spaced repetition due to the known rewrite limitation (see below).
+- The pair-hydration + exclude-last-N + FIFO-with-embedding-pending-filter combination all work correctly.
+- Session state at search time is the pre-write snapshot (`search_older_turns` runs before `write_user_turn`) so exclusion math is correct — the just-written turn doesn't shift the recent-window basis.
+
+## Known limitations for Phase 3+ follow-on
+
+- **QueryRewriteService doesn't see `older_turns`.** For queries referencing history older than `RAG_HISTORY_RECENT_PAIRS` pairs, the rewritten query anchors to the wrong context. Fix: feed `older_turns` into the rewrite prompt. Requires flipping the compute order (older_turns before rewrite). Adds latency to the rewrite call. Defer until real usage shows this pattern is common.
+- **Query embedding is computed twice per request** — once in chat.py for `older_turns` search, once inside `RetrievalService` for chunk/concept vector search. Minor redundancy. Fix: pass embedding as a parameter to `RetrievalService.retrieve()`. Defer as part of a broader Step 3 optimization pass, or after Step 3.4 which will drop other latency more meaningfully.
 
 ## Steps 3.4-3.6 (planned)
 
