@@ -213,7 +213,7 @@ Add session-level conversation context to the RAG chatbot so multi-turn conversa
 2. **Session ID:** server-generated UUID, returned in every response JSON body, sent by client in subsequent requests. Frontend stores in sessionStorage.
 3. **Reset:** dedicated `DELETE /api/chat/session/<id>` endpoint (Step 3.5)
 4. **History pattern:** last 2 turn-pairs verbatim in prompt (RECENT CONVERSATION) + top 3 vector-retrieved older turns (RELEVANT EARLIER CONVERSATION). Query embedding from chunk retrieval is reused for history search.
-5. **Turn embedding:** user query and assistant response embedded separately, asynchronously via RQ worker (Step 3.4). Soft-skip on failure — turn stored with `embedding=None`, `embedding_pending=True`.
+5. **Turn embedding:** user query and assistant response embedded separately, asynchronously via RQ worker (Step 3.4, done). Turn written with `embedding=None`, `embedding_pending=True`; worker back-fills. Soft-skip on failure after retries exhaust — pending stays true.
 6. **Session cap:** 40 turns per session, FIFO eviction.
 
 ## Step status
@@ -224,8 +224,8 @@ Add session-level conversation context to the RAG chatbot so multi-turn conversa
 | 3.2 | Session-aware chat endpoint via SessionService | Done — validated 2026-06-17; commit `b8862da` |
 | 3.3a | QueryRewriteService for context-aware retrieval | Done — validated 2026-06-17; commit `d6f4b76` |
 | 3.3b | Vector retrieval over session history | Done — validated 2026-06-18; commit `a689067` |
-| 3.4 | Async embedding write-back via RQ worker | Not started |
-| 3.5 | Reset endpoint (`DELETE /api/chat/session/<id>`) | Not started |
+| 3.4 | Async embedding write-back via RQ worker | Done — validated 2026-07-07; commit `cf0e412` |
+| 3.5 | Reset endpoint (`DELETE /api/chat/session/<id>`) | Not started — next up |
 | 3.6 | Railway deployment prep | Not started |
 
 ## Step 3.1 — SessionRepository (commit `33fdb8a`)
@@ -299,16 +299,27 @@ Validated 2026-06-18 via diagnostic script and 5-message curl conversation.
 - The pair-hydration + exclude-last-N + FIFO-with-embedding-pending-filter combination all work correctly.
 - Session state at search time is the pre-write snapshot (`search_older_turns` runs before `write_user_turn`) so exclusion math is correct — the just-written turn doesn't shift the recent-window basis.
 
+## Step 3.4 — Async embedding write-back via RQ worker (commit `cf0e412`)
+
+Moves turn embedding off the chat request path. `SessionService._write_turn` now writes the turn dict synchronously with `embedding_pending=True`, then fire-and-forget enqueues `app.workers.session_jobs.embed_turn` on the existing `rag-jobs` queue. The worker job reads the turn by `(session_id, turn_id)`, embeds via `EmbeddingService`, and calls `SessionRepository.update_turn_embedding` to back-fill.
+
+- Retry: `Retry(max=3, interval=[10, 30, 60])`, `job_timeout=60`. If all attempts fail, the turn stays `embedding_pending=True` — no user-visible failure. Vector search over session history already skips pending turns (Step 3.3b), so nothing breaks; the turn remains available for `recent_pairs` and can be re-embedded on a later message.
+- Reuses the `rag-jobs` queue (no queue split) — same worker handles session embedding and ingestion jobs.
+- `enqueue_embed_turn` catches `Exception` around the RQ enqueue call itself (Redis unreachable at the RQ layer) and logs a warning rather than raising — the turn is already durably written by that point.
+- `create_app()` inside the job follows the same pattern as `ingest_jobs.py` / `concept_jobs.py`.
+
+Validated 2026-07-07: live worker run processed 10 `embed_turn` jobs across two test sessions, all `Job OK`; Redis inspection confirmed every turn flipped `embedding_pending: false` with a populated `embedding` and `embedded_at` timestamp within ~1-6s of the chat response returning. Re-ran the Step 3.3a 3-message context-carrying conversation post-refactor with no regression (query rewriting and history retrieval unaffected).
+
+Timing: reclaims ~2-3 seconds per chat response in practice (measured msg 1: ~14s → ~11.4s; msg 2: ~13s → ~10.8s) — larger than the original ~800ms estimate because synchronous embedding calls were actually costing ~1.5s each, not the estimated ~600ms.
+
 ## Known limitations for Phase 3+ follow-on
 
 - **QueryRewriteService doesn't see `older_turns`.** For queries referencing history older than `RAG_HISTORY_RECENT_PAIRS` pairs, the rewritten query anchors to the wrong context. Fix: feed `older_turns` into the rewrite prompt. Requires flipping the compute order (older_turns before rewrite). Adds latency to the rewrite call. Defer until real usage shows this pattern is common.
 - **Query embedding is computed twice per request** — once in chat.py for `older_turns` search, once inside `RetrievalService` for chunk/concept vector search. Minor redundancy. Fix: pass embedding as a parameter to `RetrievalService.retrieve()`. Defer as part of a broader Step 3 optimization pass, or after Step 3.4 which will drop other latency more meaningfully.
 
-## Steps 3.4-3.6 (planned)
+## Steps 3.5-3.6 (planned)
 
-**3.4** — Move turn embedding to async RQ worker job. `SessionService._write_turn` gets swapped for an enqueue call. Reclaims ~800ms per request. Worker startup required.
-
-**3.5** — `DELETE /api/chat/session/<id>` endpoint. Backend for the "New conversation" UI button.
+**3.5** — `DELETE /api/chat/session/<id>` endpoint. Backend for the "New conversation" UI button. Next up.
 
 **3.6** — Railway deployment: web service (Flask), worker service, Redis, Postgres+pgvector. Environment vars, migrations on deploy. Then real-usage learning begins.
 
