@@ -20,8 +20,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Now copy the rest of the code
 COPY . .
 
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Railway sets $PORT automatically. Gunicorn binds to it.
 # We don't EXPOSE a port here because Railway handles port routing.
 
 # Default command — Railway will override this per service (web vs worker)
-CMD gunicorn --bind 0.0.0.0:${PORT:-8000} run:app
+CMD ["/app/entrypoint.sh"]
