@@ -226,7 +226,8 @@ Add session-level conversation context to the RAG chatbot so multi-turn conversa
 | 3.3b | Vector retrieval over session history | Done — validated 2026-06-18; commit `a689067` |
 | 3.4 | Async embedding write-back via RQ worker | Done — validated 2026-07-07; commit `cf0e412` |
 | 3.5 | Reset endpoint (`DELETE /api/chat/session/<id>`) | Done — validated 2026-07-07; commit `3f24f10` |
-| 3.6 | Railway deployment prep | Next |
+| 3.6a | Deploy pipeline fix (migrations on deploy) | Done — commit `4b0db0a`, validated 2026-07-08 |
+| 3.6b | Concepts backfill | Done — validated 2026-07-10 (backfill drained 2026-07-08) |
 
 ## Step 3.1 — SessionRepository (commit `33fdb8a`)
 
@@ -327,10 +328,54 @@ Validated 2026-07-07 via 6 curl tests, all passing: session created then deleted
 
 - **QueryRewriteService doesn't see `older_turns`.** For queries referencing history older than `RAG_HISTORY_RECENT_PAIRS` pairs, the rewritten query anchors to the wrong context. Fix: feed `older_turns` into the rewrite prompt. Requires flipping the compute order (older_turns before rewrite). Adds latency to the rewrite call. Defer until real usage shows this pattern is common.
 - **Query embedding is computed twice per request** — once in chat.py for `older_turns` search, once inside `RetrievalService` for chunk/concept vector search. Minor redundancy. Fix: pass embedding as a parameter to `RetrievalService.retrieve()`. Defer as part of a broader Step 3 optimization pass, or after Step 3.4 which will drop other latency more meaningfully.
+- **Frontend doesn't thread `session_id` between requests.** When testing production via the browser at cognitiontodayrag-production-2b4f.up.railway.app, follow-up queries like "tell me more" don't get the RECENT CONVERSATION context because `session_id` isn't sent on the second request. Backend is functionally correct (verified via curl with explicit `session_id`). Frontend repo (separate from CognitionToday_RAG) needs to persist `session_id` and include it in subsequent POSTs. Not blocking Phase 3 close.
 
-## Step 3.6 (planned)
+## Step 3.6 — Railway deployment (production)
 
-**3.6** — Railway deployment: web service (Flask), worker service, Redis, Postgres+pgvector. Environment vars, migrations on deploy. Then real-usage learning begins. Next up.
+### Step 3.6a — Deploy pipeline fix (commit `4b0db0a`)
+
+Production Postgres was missing all migrations after the initial schema because the Dockerfile CMD started gunicorn directly with no migration step. Every Phase 2 and Phase 3 push had deployed new code against a stale schema, causing chat requests to 500 on the missing concepts table.
+
+Fix: added `entrypoint.sh` at repo root that runs `flask db upgrade` before starting gunicorn. Modified Dockerfile CMD to invoke the entrypoint. Uses `set -e` so migration failure aborts startup, keeping the previous deploy running until the issue is resolved.
+
+Only affects the web service. Worker service uses a Railway Custom Start Command override (`"python worker.py"`) and is unchanged. Flask auto-discovers the app via `run.py` in `/app` — no `FLASK_APP` env var needed.
+
+Validated 2026-07-08: Railway deploy log confirmed both Phase 2 migrations applied (`2a0bf3ccc1f5` add concepts table, `52bc90ba202a` add embedding_input column). Chat endpoint transitioned from 500 errors to functional responses, initially chunk-only since concepts table was empty.
+
+### Corpus reconciliation (2026-07-08)
+
+Production Postgres had 340 active documents vs local's 325. Audit via short-document query and URL pattern query revealed the same 15 non-article URLs Phase 2 had cleaned locally at commit `0717414` (login, membership-*, contact-us, subscribe, disclaimer, donate, psychology-myth-vs-fact-quiz, can-you-spot-these-cognitive-biases).
+
+Applied the same soft-delete pattern:
+- `UPDATE document_versions SET is_active = false` on the 15 matching document_ids
+- `UPDATE documents SET active_version_id = NULL` on the same 15 rows
+
+Result: 340 → 325 active documents (matches local exactly). Rollback SQL available if needed but not used.
+
+### Step 3.6b — Concepts backfill (validated 2026-07-10)
+
+Called `POST /api/admin/concepts/backfill` with `limit=400`. Endpoint enqueued 315 jobs (the `~exists()` query in concepts_backfill filters versions that already have concepts — 10 versions apparently had residual concepts from earlier partial work).
+
+Worker drained 315 jobs between 2026-07-08 15:23:53 UTC and 16:50:24 UTC — ~87-minute window.
+
+Verified 2026-07-10 with:
+- Total concepts: 3951 (vs local's 3933 — small variance from LLM extraction non-determinism)
+- All embedded (`with_embedding` = 3951, without_embedding = 0)
+- All with `embedding_input` populated (Phase 2 Step 6b.2a format)
+- Distribution matches local: min=7, max=15, avg=12.16 concepts per doc, 0 docs with zero/under-5/over-15
+
+Also verified end-to-end chat via curl:
+- Query "What is confirmation bias?" returned 8 concepts, all "Confirmation bias" variants
+- Response had 4 citations split between 2 chunks and 2 concepts — both retrieval channels contributed
+- Session continuity works: follow-up "tell me more about it" with `session_id` got query-rewritten to "Tell me more about confirmation bias" and returned an expanded 749-char answer
+
+## Phase 3 status (2026-07-10)
+
+Functionally shipped:
+- All 6 steps (3.1 through 3.6) complete on production
+- End-to-end chat works via curl with full context (query rewriting, session history, chunk + concept retrieval, citations)
+- Frontend needs one small fix to enable multi-turn conversations in browser (see known limitations above)
+- Steps 3.6c through 3.6f (further Railway hardening) not scoped in this phase
 
 ## Phase 3 architectural notes
 
