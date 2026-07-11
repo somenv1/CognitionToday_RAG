@@ -328,7 +328,7 @@ Validated 2026-07-07 via 6 curl tests, all passing: session created then deleted
 
 - **QueryRewriteService doesn't see `older_turns`.** For queries referencing history older than `RAG_HISTORY_RECENT_PAIRS` pairs, the rewritten query anchors to the wrong context. Fix: feed `older_turns` into the rewrite prompt. Requires flipping the compute order (older_turns before rewrite). Adds latency to the rewrite call. Defer until real usage shows this pattern is common.
 - **Query embedding is computed twice per request** — once in chat.py for `older_turns` search, once inside `RetrievalService` for chunk/concept vector search. Minor redundancy. Fix: pass embedding as a parameter to `RetrievalService.retrieve()`. Defer as part of a broader Step 3 optimization pass, or after Step 3.4 which will drop other latency more meaningfully.
-- **Frontend doesn't thread `session_id` between requests.** When testing production via the browser at cognitiontodayrag-production-2b4f.up.railway.app, follow-up queries like "tell me more" don't get the RECENT CONVERSATION context because `session_id` isn't sent on the second request. Backend is functionally correct (verified via curl with explicit `session_id`). Frontend repo (separate from CognitionToday_RAG) needs to persist `session_id` and include it in subsequent POSTs. Not blocking Phase 3 close.
+- ~~**Frontend doesn't thread `session_id` between requests.**~~ Resolved 2026-07-10 in frontend commit `6981a8b`. Frontend now stores session_id from responses, includes it in subsequent chat POSTs, and calls DELETE on New Conversation. Verified via DevTools request payload showing session_id present in follow-up requests, and via context-aware "tell me more" behavior in production browser.
 
 ## Step 3.6 — Railway deployment (production)
 
@@ -374,7 +374,7 @@ Also verified end-to-end chat via curl:
 Functionally shipped:
 - All 6 steps (3.1 through 3.6) complete on production
 - End-to-end chat works via curl with full context (query rewriting, session history, chunk + concept retrieval, citations)
-- Frontend needs one small fix to enable multi-turn conversations in browser (see known limitations above)
+- Frontend session_id threading resolved (2026-07-10). Multi-turn conversations, context-aware follow-ups, and session reset all working end-to-end in production browser.
 - Steps 3.6c through 3.6f (further Railway hardening) not scoped in this phase
 
 ## Phase 3 architectural notes
